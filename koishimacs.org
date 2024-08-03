@@ -1,0 +1,2237 @@
+#+title: Emacs Literate Startup
+#+author: gynamics
+#+date: <2024-07-21 Sun>
+#+property: header-args :tangle yes
+
+* Prelude
+** header
+More and more packages, more and more configuration code, it turns to be more and more inconvenient to browse them in a single ~init.el~. However, if we separate them into multiple files, it actually exacerbates the dilemma of loose configuration management.
+
+Therefore we will need a method to organize that large configuration file, both conceptually and visually. Although this could be achieved by a variety of tools in Emacs IDE without bothering the code itself, a more powerful approach is to bring everything into an org document.
+
+This configuration style make use of ~org-babel-load-file~, with ~org-mode~, we can slice these emacs configuration blocks into smaller and smaller code blocks with good document (and all kinds of other information related) attached, which are always well organized in a tree.
+
+This is the header of generated file:
+
+#+begin_src emacs-lisp
+  ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
+
+  ;; Author: gynamics
+  ;; Version: 5.0.0
+  ;; Package-Requires:
+
+  ;;; Commentary:
+
+  ;; Koishimacs -- The Emacs in Your Subconsciousness
+  ;; This file is auto-generated from org blocks.
+
+  ;;; Code:
+
+#+end_src
+
+You modifications in org code blocks will not take effect until next startup. If you want some options take effect immediately for further operations (e. g. set ~use-package-deferring-keywords~), you can evaluate them immediately with ~C-x C-e~ (~eval-last-sexp~).
+
+** preface
+Principles of my Emacs configuration:
+
+1. less is more: policy rather than framework
+2. iterability: always ease to modify rather than contiguous integration
+3. readability: representation determines control structure while interaction methods determine representation
+
+By (1) and (2), I just separate configurations into code blocks and ~use-package~ statements. As for cross-block dependencies, they can be removed by
+1. internal dependency serialization: adjust loading order with ~use-package~ keywords, hooks and other emacs utilities.
+2. external dependency integration: push these variables forward with some helpers.
+so that all packages can be loosely coupled. I just care about if a package can be joined or replaced with minimal affects, rather than if a package can be joined in the same manner. Even a heavy refactorization shouldn't bother the existing code unless there is a significant change in package management.
+
+By (3), ~org-mode~ can organize everything for me. I do not need a sparse directory tree with annoying abstract levels, and I can edit this document as efficient as edit a project in an IDE, because lisp is good at process nested structures, and org document itself is a tree.
+
+My main goal is to produce a portable configuration that can be easily ported to a new machine, and then keep iterating with it. If you believe that there will never be an ultimate Emacs configuration for you, then why not embrace this stinging world and enjoy a thorny road?
+
+** environment
+~setenv~ will just set environment variable for current emacs process, in ~process-environment~.
+
+However, if we start a subprocess from emacs, it uses environment variables inherited from the parent process of Emacs, which provides ~initial-environment~. To change this, we should modify variable ~exec-path~.
+
+#+begin_src emacs-lisp
+  (defun my:add-to-env-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
+    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
+      (dolist (path additional-path-list)
+        (let ((path-string (eval path)))
+          (unless (member path-string env-path-list)
+            (push path-string env-path-list))))
+      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
+
+  (defun my:add-to-exec-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
+    (dolist (path additional-path-list)
+      (let ((path-string (eval path)))
+        (unless (member path-string exec-path)
+          (add-to-list 'exec-path path-string)))))
+
+  (let ((home (file-name-as-directory (getenv "HOME"))))
+    ;; set PATH as well as exec-path
+    (mapc
+     (lambda (f)
+       (funcall
+        f
+        (list  ;; extend the value of EXEC-PATH and $PATH here
+         ;; for haskell
+         (concat home ".ghcup/bin")
+         (concat home ".cabal/bin")
+         ;; for rust
+         (concat home ".cargo/bin")
+         ;; for ruby
+         (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\"")
+         )))
+     '(my:add-to-env-path
+       my:add-to-exec-path
+       ))
+    ;; set go workspace
+    (setenv "GOPATH" (concat home ".go"))
+    )
+
+  ;; proxy (if you have one)
+  (setenv "http_proxy" "http://127.0.0.1:2080")
+  (setenv "https_proxy" "http://127.0.0.1:2080")
+  (setenv "ALL_PROXY" "socks5://127.0.0.1:2080")
+
+#+end_src
+
+Moreover, another annoying thing this is static paths to various files as arguments. To make is easier, there are several helpers help create or neglect missing files in initialization. A more generic implementation is expected here (e . g. add ~:depends~ or ~:import~ keywords to ~use-package~, that seems to be too complex)
+
+#+begin_src emacs-lisp
+  (defun my:strong-directory (dir &optional parents)
+    "Return DIR, if it does not exist, try to create it."
+    (if (file-directory-p dir)
+        dir
+      (condition-case nil
+          (make-directory dir parents)
+        (:success dir)
+        (error "failed to create directory %s" dir))))
+
+  (defun my:weak-directory (dir)
+    "Return DIR, if it does not exist return nil."
+    (when (file-directory-p dir) dir))
+
+  (defun my:weak-path (path)
+    "Return PATH, if it does not exist return nil."
+    (when (file-exists-p path) path))
+
+  (defun my:weak-directory-override (sym dir)
+    "Override the value of symbol SYM with DIR if it exists."
+    (unless (symbolp sym)
+      (error "%S is not a symbol!" sym))
+    (when (file-directory-p dir)
+      (set sym dir)))
+#+end_src
+
+** package manager
+As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~.
+
+To accelerate emacs startup we do lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
+
+#+begin_src emacs-lisp
+  (use-package use-package
+    :demand t
+    :custom
+    (use-package-always-defer t)
+    ;; set up this to get package loading statistics
+    (use-package-compute-statistics t)
+    )
+
+  ;; involve this to make use-package find personal-keybindings
+  (use-package bind-key :ensure t :demand t)
+  (use-package diminish :ensure t :demand t)
+#+end_src
+
+Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
+
+BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
+
+#+begin_src emacs-lisp
+  (use-package org :ensure t :autoload org-babel-tangle-file)
+
+  (defun my:regenerate-koishimacs-config (byte-compile-p)
+    "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
+  If BYTE-COMPILE-P is given as t, byte compile it."
+    (interactive "P")
+    (let ((config-org (concat user-emacs-directory "koishimacs.org"))
+          (config-el (concat user-emacs-directory "koishimacs.el")))
+      (org-babel-tangle-file config-org config-el)
+      (when byte-compile-p
+        (let ((byte-compile-warnings
+               '(not free-vars unresolved noruntime lexical make-local)))
+          (byte-compile-file config-el)))
+      )
+    )
+#+end_src
+
+Early evaluation takes place in the compiling process, this will slightly reduce some work like patching and updating packages. If there happened to be something wrong with a code block, you can add ~:tangle no~ after ~#+begin_src emacs-lisp~ to skip it when compiling, then recompile the configuration file and debug that block manually on next startup.
+
+With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronous byte-compiling.
+
+#+begin_src emacs-lisp
+  (use-package async
+    :ensure t
+    :demand t
+    :autoload (async-byte-recompile-directory)
+    :custom
+    (async-bytecomp-package-p t)
+    :init
+    (defun my:byte-compile-subdirectories (dir)
+      "Byte compile all subdirectories under DIR."
+      (interactive "DPath of parent directory: ")
+      (dolist (file (file-name-all-completions "" dir))
+        (when (and (directory-name-p file)
+                   (not (member file '("./" "../"))))
+          (async-byte-recompile-directory
+           (concat (file-name-as-directory dir) file)))))
+    )
+#+end_src
+
+With package ~el-get~ we will be able to get packages from other sources like github. Here we define a ~:el-get~ keyword for ~use-package~ to invoke ~el-get-bundle~.
+
+#+begin_src emacs-lisp
+  (use-package el-get
+    :ensure t
+    :autoload (el-get-bundle)
+    :preface
+    ;; idea from kurubushi's use-package--el-get.el
+    (setq use-package-keywords (cons :el-get use-package-keywords))
+    (defalias 'use-package-normalize/:el-get 'use-package-normalize-symlist)
+    (defun use-package-handler/:el-get (name keyword args rest state)
+      (use-package-concat
+       `((el-get-bundle ,@args))
+       (use-package-process-keywords name rest state)))
+    )
+#+end_src
+
+** early ensure
+These packages are registered to ~prog-mode-hook~ and ~emacs-lisp-mode~ inherits this hook, so we had better declare them early here to avoid compile errors on bootstrap.
+
+#+begin_src emacs-lisp
+  (use-package company :ensure t)
+  (use-package flycheck :ensure t)
+  (use-package lsp-ui :ensure t)
+  (use-package yasnippet :ensure t)
+#+end_src
+
+* UI
+** nongui startup
+With this predicate, we can avoid loading something packages that may
+cause problems in terminal. However, the client configuration depends
+on the daemon. To make clients available for GUI, the daemon has to be
+excluded. Unfortunately, we still can not set this in ~early-init.el~
+
+#+begin_src emacs-lisp
+  (defvar my/load-gui-config-p
+    (or (display-graphic-p) (daemonp)))
+#+end_src
+
+** be iconic
+~nerd-icons~ provides a basic recipe, and ~diminish~ beautifies the modeline.
+
+#+begin_src emacs-lisp
+  (use-package nerd-icons
+    :ensure t
+    :demand t
+    :when my/load-gui-config-p
+    )
+
+  (use-package nerd-icons-completion
+    :ensure t
+    :when my/load-gui-config-p
+    :config
+    (nerd-icons-completion-mode)
+    :hook
+    (marginalia-mode . nerd-icons-completion-marginalia-setup)
+    )
+
+  (use-package nerd-icons-dired
+    :ensure t
+    :when my/load-gui-config-p
+    :config
+    ;; do not let it break `wdried-mode`
+    (advice-add
+     #'wdired-change-to-wdired-mode
+     :before (lambda () (nerd-icons-dired-mode -1)))
+    (advice-add
+     #'wdired-change-to-dired-mode
+     :after (lambda () (nerd-icons-dired-mode +1)))
+    :hook
+    (dired-mode . nerd-icons-dired-mode)
+    )
+
+  (use-package nerd-icons-ibuffer
+    :ensure t
+    :when my/load-gui-config-p
+    :hook (ibuffer-mode . nerd-icons-ibuffer-mode)
+    )
+
+  ;; config diminish for some built-in packages
+  (use-package abbrev :diminish (abbrev-mode . "  "))
+  (use-package autorevert :diminish (auto-revert-mode . "  "))
+  (use-package whitespace :diminish (whitespace-mode . "  "))
+  (use-package org-capture :diminish (org-capture-mode . " 󰄀"))
+#+end_src
+
+** color theme
+The theme package of doomacs is good.
+
+#+begin_src emacs-lisp
+  (use-package doom-themes
+    :ensure t
+    :when my/load-gui-config-p
+    :demand t
+    :custom
+    (doom-themes-enable-bold t)
+    (doom-themes-enable-italic t)
+    (doom-themes-treemacs-theme "doom-colors")
+    :config
+    (load-theme 'doom-zenburn t)
+    (doom-themes-visual-bell-config)
+    (doom-themes-treemacs-config)
+    (doom-themes-org-config)
+    )
+#+end_src
+
+** modeline
+~doom-modeline~ is the coolest one. However, it is not compatible with
+many other cool things.
+
+#+begin_src emacs-lisp
+  (use-package doom-modeline
+    :ensure t
+    :when my/load-gui-config-p
+    :demand t
+    :custom
+    (doom-modeline-minor-modes t)
+    (doom-modeline-mode t)
+    )
+
+  (use-package hide-mode-line
+    :ensure t
+    :bind
+    ("M-M" . hide-mode-line-mode)
+    )
+
+  ;; currently, keycast-mode-line-mode is not compatible with doom-modeline
+  ;; but other keycast modes are still useful
+  (use-package keycast
+    :ensure t
+    :custom
+    (keycast-mode-line-insert-after '(:eval (doom-modeline-format--main)))
+    )
+#+end_src
+
+** completion
+Emacs use minibuffer for quick interactions, most interactions can be
+accelerated by a powerful completion framework.
+
+- ~vertico~ provides a performant and minimalist vertical completion UI
+- ~consult~ provides search and navigation commands
+- ~embark~ provides a unified action to access to actions (commands) relevant to the target around point.
+
+Actually, this framework is too powerful and there has be a lot of extensions. I will just use some basic features it seems to have. As for other functions, we have other packages that aims to do it.
+
+Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior differs from ~isearch-forward~, I found that replacing this keybinding indeed accelerated my daily usage.
+
+#+begin_src emacs-lisp
+  (use-package orderless
+    :ensure t
+    :demand t
+    :custom
+    (completion-styles '(orderless basic))
+    (completion-category-overrides '((file (styles basic partial-completion))))
+    )
+
+  (use-package vertico
+    :ensure t
+    :diminish
+    ((vertico-mode . " 󰄄")
+     (vertico-multiform-mode . " 󰛡"))
+    :init
+    (vertico-mode)
+    (setq vertico-cycle t)
+    (setq vertico-multiform-categories
+          '((embark-keybinding grid)
+            (consult-grep buffer)))
+    (vertico-multiform-mode)
+    :bind
+    (:map vertico-map
+          ("?" . embark-keybindings)
+          ("TAB" . minibuffer-complete) ;; orig: vertico-insert
+          ("C-<tab>" . vertico-insert)
+          )
+    )
+
+  ;; Persist history over Emacs restarts. Vertico sorts by history position.
+  (use-package savehist
+    :ensure t
+    :init (savehist-mode)
+    )
+
+  (use-package emacs
+    :custom
+    ;; Support opening new minibuffers from inside existing minibuffers.
+    (enable-recursive-minibuffers t)
+    ;; Emacs 28 and newer: Hide commands in M-x which do not work in the current
+    ;; mode.  Vertico commands are hidden in normal buffers. This setting is
+    ;; useful beyond Vertico.
+    (read-extended-command-predicate #'command-completion-default-include-p)
+    :init
+    ;; Add prompt indicator to `completing-read-multiple'.
+    ;; We display [CRM<separator>], e.g., [CRM,] if the separator is a comma.
+    (defun crm-indicator (args)
+      (cons (format "[CRM%s] %s"
+                    (replace-regexp-in-string
+                     "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+                     crm-separator)
+                    (car args))
+            (cdr args)))
+    (advice-add #'completing-read-multiple :filter-args #'crm-indicator)
+
+    ;; Do not allow the cursor in the minibuffer prompt
+    (setq minibuffer-prompt-properties
+          '(read-only t cursor-intangible t face minibuffer-prompt))
+    (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
+    )
+
+  (use-package marginalia
+    :ensure t
+    :init (marginalia-mode)
+    )
+
+  (use-package consult
+    :ensure t
+    ;; The :init configuration is always executed (Not lazy)
+    :init
+
+    ;; Optionally configure the register formatting. This improves the register
+    ;; preview for `consult-register', `consult-register-load',
+    ;; `consult-register-store' and the Emacs built-ins.
+    (setq register-preview-delay 0.5
+          register-preview-function #'consult-register-format)
+
+    ;; Optionally tweak the register preview window.
+    ;; This adds thin lines, sorting and hides the mode line of the window.
+    (advice-add #'register-preview :override #'consult-register-window)
+
+    ;; Use Consult to select xref locations with preview
+    (setq xref-show-xrefs-function #'consult-xref
+          xref-show-definitions-function #'consult-xref)
+
+    :config
+    ;; Optionally configure preview. The default value
+    ;; is 'any, such that any key triggers the preview.
+    ;; (setq consult-preview-key 'any)
+    ;; (setq consult-preview-key "M-.")
+    ;; (setq consult-preview-key '("S-<down>" "S-<up>"))
+    ;; For some commands and buffer sources it is useful to configure the
+    ;; :preview-key on a per-command basis using the `consult-customize' macro.
+    (consult-customize
+     consult-theme :preview-key '(:debounce 0.2 any)
+     consult-ripgrep consult-git-grep consult-grep
+     :preview-key '(:debounce 0.4 any)
+     consult-bookmark consult-recent-file consult-xref
+     consult--source-bookmark consult--source-file-register
+     consult--source-recent-file consult--source-project-recent-file
+     :preview-key '("S-<down>" "S-<up>"))
+
+    ;; Optionally configure the narrowing key.
+    ;; Both < and C-+ work reasonably well.
+    (setq consult-narrow-key "<") ;; "C-+"
+
+    ;; define a thing-at-point search function
+    (defalias 'consult-line-thing-at-point 'consult-line)
+    (consult-customize
+     consult-line-thing-at-point
+     :initial (thing-at-point 'symbol))
+
+    :bind (;; C-c bindings in `mode-specific-map'
+           ("C-c M-x" . consult-mode-command)
+           ("C-c h" . consult-history)
+           ("C-c k" . consult-kmacro)
+           ("C-c m" . consult-man)
+           ("C-c i" . consult-info)
+           ("C-c r" . consult-register)
+           ([remap Info-search] . consult-info)
+           ;; C-x bindings in `ctl-x-map'
+           ("C-x M-:" . consult-complex-command)     ;; orig. repeat-complex-command
+           ("C-x b"   . consult-buffer)              ;; orig. switch-to-buffer
+           ("C-x 4 b" . consult-buffer-other-window) ;; orig. switch-to-buffer-other-window
+           ("C-x 5 b" . consult-buffer-other-frame)  ;; orig. switch-to-buffer-other-frame
+           ("C-x t b" . consult-buffer-other-tab)    ;; orig. switch-to-buffer-other-tab
+           ("C-x r b" . consult-bookmark)            ;; orig. bookmark-jump
+           ("C-x p b" . consult-project-buffer)      ;; orig. project-switch-to-buffer
+           ;; Other custom bindings
+           ("M-y" . consult-yank-pop)                ;; orig. yank-pop
+           ("C-s" . consult-line)                    ;; orig. isearch-forward
+           ;; M-g bindings in `goto-map'
+           ("M-g e" . consult-compile-error)
+           ("M-g g" . consult-goto-line)             ;; orig. goto-line
+           ("M-g o" . consult-outline)               ;; Alternative: consult-org-heading
+           ("M-g m" . consult-mark)
+           ("M-g k" . consult-global-mark)
+           ("M-g i" . consult-imenu)
+           ("M-g I" . consult-imenu-multi)
+           ;; M-s bindings in `search-map'
+           ("M-s d" . consult-find)                  ;; Alternative: consult-fd
+           ("M-s c" . consult-locate)
+           ("M-s g" . consult-grep)
+           ("M-s G" . consult-git-grep)
+           ("M-s r" . consult-ripgrep)
+           ("M-s ." . consult-line-thing-at-point)
+           ("M-s l" . consult-line)
+           ("M-s L" . consult-line-multi)
+           ("M-s k" . consult-keep-lines)
+           ("M-s u" . consult-focus-lines)
+           ("M-s s" . isearch-forward)
+           ;; Isearch integration
+           ("M-s e" . consult-isearch-history)
+           :map isearch-mode-map
+           ("M-s e" . consult-isearch-history)       ;; orig. isearch-edit-string
+           ("M-s l" . consult-line)                  ;; needed by consult-line to detect isearch
+           ("M-s L" . consult-line-multi)            ;; needed by consult-line to detect isearch
+           )
+
+    ;; Enable automatic preview at point in the *Completions* buffer. This is
+    ;; relevant when you use the default completion UI.
+    :hook (completion-list-mode . consult-preview-at-point-mode)
+    )
+
+  (use-package consult-flycheck
+    :ensure t
+    :bind ("M-g f" . consult-flycheck)              ;; Alternative: consult-flymake
+    )
+
+  (use-package consult-lsp
+    :ensure t
+    :bind
+    (:map lsp-mode-map
+          ([remap xref-find-apropos] . consult-lsp-symbols))
+    )
+
+  (use-package embark
+    :ensure t
+    :bind
+    (("C-." . embark-act)         ;; pick some comfortable binding
+     ("M-." . embark-dwim)        ;; good alternative: M-.
+     ("C-h B" . embark-bindings)) ;; alternative for `describe-bindings'
+    :autoload (embark-prefix-help-command)
+    :init
+    (setq prefix-help-command #'embark-prefix-help-command)
+    (setq embark-indicators
+          '(embark-minimal-indicator
+            embark-highlight-indicator
+            embark-isearch-highlight-indicator))
+    (setq embark-help-key "?")
+    ;; Hide the mode line of the Embark live/completions buffers
+    (add-to-list 'display-buffer-alist
+                 '("\\`\\*Embark Collect \\(Live\\|Completions\\)\\*"
+                   nil
+                   (window-parameters (mode-line-format . none))))
+    )
+
+  (use-package embark-consult
+    :ensure t ; only need to install it, embark loads it after consult if found
+    :hook
+    (embark-collect-mode . consult-preview-at-point-mode)
+    )
+
+#+end_src
+
+** popwin
+Except for minibuffer, we usually use interactive buffers for more
+complicated interactions. Another solution may be introduced to manage
+all such buffers, e. g. vterm, ibuffer, message, etc.
+
+~popwin~ provides more agile workflows based on popup buffers.
+Related packages that provides auxiliary functions must be placed before it.
+
+Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we won't add ~occur-mode~ to ~popwin:special-display-config~~
+
+#+begin_src emacs-lisp
+  (use-package popwin
+    :ensure t
+    :autoload (popwin:popup-buffer
+               popwin:get-buffer
+               popwin:stick-popup-window
+               popwin:close-popup-window
+               )
+    :preface
+    (defun my:popwin:scratch ()
+      "Show *scratch* in a popwin, if not exist, create it."
+      (interactive)
+      (popwin:popup-buffer (get-scratch-buffer-create)))
+
+    (defun my:popwin:scratch-toggle (&optional arg)
+      "Toggle *scratch* buffer as a popwin."
+      (interactive "P")
+      (if (get-buffer-window "*scratch*" (selected-frame))
+          (popwin:close-popup-window)
+        (progn
+          (my:popwin:scratch)
+          (popwin:stick-popup-window))))
+
+    :init
+    ;; enable popwin mode
+    (popwin-mode)
+
+    :config
+    ;; special display config
+    (push '("*Macroexpansion*" :noselect t) popwin:special-display-config)
+    (push "*Pp Eval Output*" popwin:special-display-config)
+
+    :bind-keymap
+    ("C-z" . popwin:keymap)
+    :bind
+    (("C-`" . my:popwin:scratch-toggle)
+     :map popwin:keymap
+     ("C-z" . suspend-emacs)
+     ("b" . my:popwin:ibuffer)
+     ("r" . my:popwin:register-list)
+     ("v" . my:popwin:vterm)
+     ("x" . my:popwin:eshell)
+     ("c" . my:popwin:scratch)
+     )
+    )
+
+  (use-package eshell
+    :functions (my:popwin:eshell)
+    :commands (eshell)
+    :preface
+    (setq eshell-buffer-name "*eshell*")
+
+    (defun my:popwin:eshell (&optional arg)
+      "Run eshell in a popwin. ARG is passed to eshell."
+      (interactive "P")
+      (let ((eshell-buf (cond ((numberp arg)
+                               (format "%s<%d>" eshell-buffer-name arg))
+                              (t
+                               eshell-buffer-name))))
+        (unless (buffer-live-p eshell-buf)
+          (eshell arg) ;create eshell buffer
+          (switch-to-prev-buffer))
+        (popwin:popup-buffer
+         (popwin:get-buffer eshell-buf :create))))
+    )
+
+  (use-package vterm
+    :ensure t
+    :functions (my:popwin:vterm)
+    :commands (vterm)
+    :autoload (vterm-send-string
+               vterm-send-return)
+    :preface
+    (setq vterm-buffer-name "*vterm*")
+
+    (defun my:popwin:vterm (&optional arg)
+      "Run vterm in a popwin. ARG is passed to vterm."
+      (interactive "P")
+      (let ((vterm-buf (cond ((numberp arg)
+                              (format "%s<%d>" vterm-buffer-name arg))
+                             ((stringp arg)
+                              arg)
+                             (t
+                              vterm-buffer-name))))
+        (unless (buffer-live-p vterm-buf)
+          (vterm arg) ;create vterm buffer
+          (switch-to-prev-buffer))
+        (popwin:popup-buffer
+         (popwin:get-buffer vterm-buf :create))))
+    )
+
+  (use-package ibuffer
+    :functions (my:popwin:ibuffer)
+    :commands (ibuffer)
+    :preface
+    (defun my:popwin:ibuffer ()
+      "Show *Ibuffer* in a popwin, if not exist, create it."
+      (interactive)
+      (popwin:popup-buffer
+       (popwin:get-buffer "*Ibuffer*" :create))
+      (ibuffer))
+    )
+
+  (use-package register-list
+    :ensure t
+    :functions (my:popwin:register-list)
+    :autoload (register-list-refresh)
+    :preface
+    (defun my:popwin:register-list ()
+      "Show *Register-List* in a popwin, if not exist, create it."
+      (interactive)
+      (popwin:popup-buffer
+       (popwin:get-buffer "*Register List*" :create))
+      (register-list-refresh))
+    )
+ #+end_src
+
+** dired
+Dired is powerful but incomplete.
+
+#+begin_src emacs-lisp
+  (use-package dired-git
+    :ensure t
+    :commands (dired-git-mode)
+    )
+
+  (use-package dired-git-info
+    :ensure t
+    :commands (dired-git-info-mode)
+    )
+
+  (use-package dirvish
+    :ensure t
+    :autoload (dirvish-override-dired-mode)
+    :bind
+    (:map dirvish-mode-map
+          ;; <tab> always translates to TAB by default
+          ("TAB" . dirvish-subtree-toggle)
+          ;; but C-<tab> won't translate to C-TAB
+          ("C-<tab>" . dirvish-layout-toggle)
+          ("<"     . dirvish-history-last)
+          (">"     . dirvish-history-jump)
+          )
+    )
+
+  (use-package dired
+    :functions (wdired-change-to-wdired-mode
+                wdired-change-to-dired-mode)
+    :init
+    (dirvish-override-dired-mode)
+    :custom
+    (dired-omit-files "\\`[.].*")
+    :bind
+    (:map dired-mode-map
+          ("." . dired-omit-mode)
+          (")" . dired-git-info-mode)
+          ("C-c w" . wdired-change-to-wdired-mode)
+          )
+    )
+#+end_src
+
+** other widgets
+These are my collection, but not that important, or not used.
+
+#+begin_src emacs-lisp
+  ;; an alternative tab bar
+  (use-package centaur-tabs
+    :ensure t
+    :custom
+    (centaur-tabs-set-icons t)
+    (centaur-tabs-style "wave")
+    (centaur-tabs-set-bar 'under)
+    (x-underline-at-descent-line t)
+    (centaur-tabs-enable-key-bindings t)
+    :config
+    (centaur-tabs-headline-match)
+    :bind
+    ("C-<next>"  . centaur-tabs-forward)
+    ("C-<prior>" . centaur-tabs-backward)
+    ("C-S-<next>"  . centaur-tabs-forward-group)
+    ("C-S-<prior>" . centaur-tabs-backward-group)
+    )
+
+  ;; an alternative side bar, like neotree
+  (use-package treemacs
+    :ensure t
+    :custom
+    (treemacs-position 'right)
+    (treemacs-show-hidden-files nil)
+    (treemacs-eldoc-display 'detailed)
+    (treemacs-width 25)
+    )
+
+  ;; a fake mini code scroll map, with bad efficiency
+  (use-package minimap :ensure t)
+
+  ;; just something fun
+  (use-package power-mode
+    :ensure t
+    :when my/load-gui-config-p
+    :diminish (power-mode . " 󰟩")
+    :custom
+    (power-mode-streak-shake-threshold nil)
+    )
+
+#+end_src
+
+** dashboard
+A big but useless thing.
+
+#+begin_src emacs-lisp
+  (use-package dashboard
+    :ensure t
+    :when (display-graphic-p)
+    :diminish (dashboard-mode . " 󰕮")
+    :init
+    (dashboard-setup-startup-hook)
+    :custom-face
+    (dashboard-banner-logo-title ((t (:inherit italic :height 1.5 :family "Chopin Script"))))
+    :custom
+    (dashboard-banner-logo-title "Wish Outspeak  Without speak")
+    (dashboard-buffer-last-width 80)
+    (dashboard-center-content    t)
+    (dashboard-footer            "Richard Stallman is proud of you.")
+    (dashboard-footer-messages
+     '("Everything will be all right under the hat of unconsciousness."
+       "Embrace a stinging mind, enjoy a thorny road."
+       "Miserable creatures are reasoned to be abominable."
+       "Din~ ko.ko.da.yo!"
+       "If I am born to be exiled, I would rather exile my fate."
+       "Instinct \"Release of ID\""
+       "Suppression \"Super Ego\""
+       )
+     )
+    (dashboard-image-banner-max-height 400)
+    (dashboard-startupify-list
+     '(dashboard-insert-banner
+       dashboard-insert-newline
+       dashboard-insert-banner-title
+       dashboard-insert-newline
+       dashboard-insert-navigator
+       dashboard-insert-newline
+       dashboard-insert-init-info
+       dashboard-insert-newline
+       dashboard-insert-newline
+       dashboard-insert-footer))
+    (dashboard-navigator-buttons
+     '(((" " "Agenda" "Task for this week"
+         (lambda (&rest _) (org-agenda-list))
+         warning "[" "]")
+        (" " "Elfeed" "Browse RSS Feeds"
+         (lambda (&rest _) (elfeed))
+         warning "[" "]")
+        ("󰫔 " "EMMS" "Emacs Multi-Media System"
+         (lambda (&rest _) (emms))
+         warning "[" "]")
+        (" " "Butterfly" "Real world programming!"
+         (lambda (&rest _) (butterfly))
+         warning "[" "]")
+        )
+       )
+     )
+    (dashboard-set-file-icons    t)
+    (dashboard-set-heading-icons t)
+    (dashboard-set-init-info     t)
+    (dashboard-set-navigator     t)
+    (dashboard-image-extra-props '(:mask heuristic))
+    (dashboard-startup-banner    (my:weak-path (file-name-concat
+                                                user-emacs-directory "icons/koishimacs-logo.png")))
+    :bind
+    (:map dashboard-mode-map
+          ("a" . org-agenda)
+          ("b" . butterfly)
+          ("f" . elfeed)
+          ("m" . emms)
+          )
+    )
+#+end_src
+
+** gui
+Setup GUI. We can set the initial X window size and position. It is a
+pity that the han font can not be scaled once the size is fixed. To
+solve the problem, we can only set specific font face when width
+alignment is needed.
+
+#+begin_src emacs-lisp
+  (defvar my/fontset-config
+    '((t 'han "LXGW Wenkai Mono")
+      (t 'kana "LXGW Wenkai Mono")
+      (t nil "Symbols Nerd Font Mono" nil 'append))
+    "My preferred unicode fonts for specific fontsets.")
+
+  (defun my:setup-default-fontset (conf-list)
+    "A helper for setup fontsets, CONF-LIST is a list of args for `set-fontset-font'."
+    (dolist (conf conf-list)
+      (condition-case nil
+          (eval `(set-fontset-font ,@conf))
+        (error (message "failed to apply set-fontset-font to %S" conf)))))
+
+  (when (display-graphic-p)
+    ;; (set-frame-position (selected-frame) 60 60)
+    (set-frame-size (selected-frame) 120 40)
+    )
+
+  (when my/load-gui-config-p
+    (my:setup-default-fontset my/fontset-config)
+    ;; set default frame title
+    (setq-default frame-title-format
+                  (concat "KoishiMACs   👁️   %b   🖊️   " (user-login-name) "@" (system-name)))
+    ;; set transparent window for emacs 29+
+    (set-frame-parameter (selected-frame) 'alpha-background 80)
+    (add-to-list 'default-frame-alist '(alpha-background . 80))
+    ;; toggle pixel scrolling
+    (pixel-scroll-precision-mode)
+    )
+#+end_src
+
+Setup for server edit: always create a new frame, delete frame when done.
+
+#+begin_src emacs-lisp
+  (when (daemonp)
+    ;; set fontset for server
+    (add-hook
+     'server-after-make-frame-hook
+     #'(lambda () (my:setup-default-fontset my/fontset-config)))
+
+    ;; always create new frame
+    (add-hook
+     'server-switch-hook
+     #'(lambda ()
+         (let ((server-buf (current-buffer)))
+           (bury-buffer)
+           (if server-buffer-clients
+               (switch-to-buffer-other-frame server-buf)
+             (switch-to-buffer server-buf)))))
+
+    (custom-set-variables '(server-kill-new-buffers t))
+    (global-set-key (kbd "C-x C-c") (kbd "C-x # C-x 5 0"))
+    )
+#+end_src
+
+Terminal mode configuration, actually there are very little we can do
+to the emacsclient. Just assume that clients are all graphic frames.
+
+#+begin_src emacs-lisp
+  (unless my/load-gui-config-p
+    (xterm-mouse-mode))
+
+  (defvar arrow-keys-map (make-sparse-keymap)
+    "Keymap for arrow keys")
+  (define-key arrow-keys-map "A" [up])
+  (define-key arrow-keys-map "B" [down])
+  (define-key arrow-keys-map "C" [right])
+  (define-key arrow-keys-map "D" [left])
+  ;; arrow keys may be broken in some terminals,
+  ;; define a wrapper to translate ESC [ or ESC O
+  (define-key esc-map "[" arrow-keys-map)
+  (define-key esc-map "O" arrow-keys-map)
+#+end_src
+
+* Text Editor
+** navigation
+A hacker can fly across lines and frames.
+
+#+begin_src emacs-lisp
+  (use-package ace-window
+    :ensure t
+    :bind
+    ("M-<tab>" . ace-window)  ;; left hand
+    ("M-o"     . ace-window)  ;; right hand
+    )
+
+  (use-package ace-link
+    :ensure t
+    :init
+    (ace-link-setup-default)
+    )
+
+  (use-package avy
+    :ensure t
+    :bind
+    ("C-'"   . avy-goto-char)
+    ("C-\""  . avy-goto-char-2)
+    ("M-g l" . avy-goto-line)
+    ("M-g w" . avy-goto-word-0)
+    ("M-g e" . avy-goto-word-1)
+    )
+
+  (use-package windmove
+    :init
+    (windmove-mode)
+    :custom
+    (windmove-allow-all-windows t)
+    (windmove-default-keybindings '([ignore] meta))
+    (windmove-swap-states-default-keybindings '([ignore] meta shift))
+    (windmove-wrap-around nil)
+    )
+
+  (use-package windower
+    :ensure t
+    :commands (windower-toggle-single windower-toggle-split)
+    :bind
+    (("M-1" . windower-toggle-single)
+     ("M-2" . windower-toggle-split)
+     ("C-S-<left>"  . windower-move-border-left)
+     ("C-S-<right>" . windower-move-border-right)
+     ("C-S-<up>"    . windower-move-border-above)
+     ("C-S-<down>"  . windower-move-border-below)
+     )
+    )
+#+end_src
+
+** visualization
+More previews and visual feedback.
+
+#+begin_src emacs-lisp
+  (use-package goto-char-preview
+    :ensure t
+    :bind
+    ([remap goto-char] . goto-char-preview)
+    )
+
+  (use-package goto-line-preview
+    :ensure t
+    :bind
+    ([remap goto-line] . goto-line-preview)
+    )
+
+  (use-package visual-regexp
+    :ensure t
+    :bind
+    ([remap query-replace-regexp] . vr/query-replace)
+    ("C-c M-%" . vr/mc-mark)
+    )
+
+  (use-package vundo
+    :ensure t
+    :bind
+    ("C-c C-/" . vundo)
+    )
+
+  (use-package visual-fill-column
+    :ensure t
+    :bind
+    ("C-c M-q" . visual-fill-column-mode)
+    )
+
+  ;; view large file
+  (use-package vlf
+    :ensure t
+    :init
+    (require 'vlf-setup)
+    :custom
+    (vlf-application 'dont-ask)
+    )
+
+#+end_src
+
+** snippet
+
+#+begin_src emacs-lisp
+  (use-package yasnippet
+    :diminish (yas-minor-mode . "  ")
+    :hook ((org-mode prog-mode) . yas-minor-mode)
+    :defines yas-minor-mode-map
+    )
+
+  (use-package yasnippet-snippets
+    :ensure t
+    :after yasnippet
+    )
+
+  (use-package auto-yasnippet
+    :ensure t
+    :after yasnippet
+    :bind
+    ;; use the same prefix C-c &
+    (:map yas-minor-mode-map
+          ("C-c & w" . aya-create)
+          ("C-c & TAB" . aya-expand)
+          ("C-c & SPC" . aya-expand-from-history)
+          ("C-c & d" . aya-delete-from-history)
+          ("C-c & c" . aya-clear-history)
+          ("C-c & n" . aya-next-in-history)
+          ("C-c & p" . aya-previous-in-history)
+          ("C-c & s" . aya-persist-snippet)
+          ("C-c & o" . aya-open-line)
+          )
+    )
+#+end_src
+
+** optimized edit
+Less is more.
+
+#+begin_src emacs-lisp
+  (use-package edit-at-point
+    :ensure t
+    :autoload (edit-at-point-symbol-copy
+               edit-at-point-symbol-cut)
+    :functions (my:kill-ring-save
+                my:kill-region)
+    :init
+    (defun my:kill-ring-save ()
+      "Copy region with noselect action."
+      (interactive)
+      (if (region-active-p)
+          (call-interactively #'kill-ring-save)
+        (call-interactively #'edit-at-point-symbol-copy)))
+
+    (defun my:kill-region ()
+      "Kill region with noselect action."
+      (interactive)
+      (if (region-active-p)
+          (call-interactively #'kill-region)
+        (call-interactively #'edit-at-point-symbol-cut)))
+
+    :bind
+    ("C-w"   . my:kill-region)
+    ("M-w"   . my:kill-ring-save)
+    ("C-x w" . edit-at-point-line-cut)
+    ("C-x y" . edit-at-point-line-copy)
+    )
+
+  (use-package smartparens
+    :ensure t
+    :diminish (smartparens-mode . " 󰅲")
+    :init
+    (require 'smartparens-config)
+    :bind
+    ;; there are already in `esc-map', with ESC C- compose
+    ;; or C-M- compose
+    ([remap forward-sexp] . sp-forward-sexp)
+    ([remap backward-sexp] . sp-backward-sexp)
+    ([remap up-list] . sp-up-sexp)
+    ([remap down-list] . sp-down-sexp)
+    ([remap kill-sexp] . sp-kill-sexp)
+    ([remap transpose-sexps] . sp-transpose-sexp)
+    ;; with ESC- M- compose
+    ("ESC M-o" . sp-split-sexp)  ;; (a b) -> (a) (b)
+    ("ESC M-^" . sp-join-sexp)   ;; (a) (b) -> (a b)
+    ;; or simply M-S- compose
+    ("M-<backspace>" . sp-unwrap-sexp) ;; (a) -> a
+    ("M-(" . sp-wrap-round)            ;; a -> (a)
+    ("M-)" . sp-rewrap-sexp)   ;; (a b) -> [a b]
+    ("M-W" . sp-copy-sexp)
+    :hook (prog-mode . smartparens-mode)
+    )
+
+#+end_src
+
+** structural edit
+Edit text as structural data.
+
+#+begin_src emacs-lisp
+  (use-package multiple-cursors
+    :ensure t
+    :diminish (multiple-cursors-mode . " 󰗧")
+    :bind
+    ("C->" . mc/mark-next-like-this)
+    ("C-<" . mc/mark-all-dwim)
+    ("C-S-<mouse-1>" . mc/add-cursor-on-click)
+    )
+
+  ;; multi-point edit
+  (use-package iedit
+    :ensure t
+    :diminish (iedit-mode . " 󱢓")
+    :bind ("C-;" . iedit-mode)
+    )
+
+  ;; indirect edit everywhere
+  (use-package separedit
+    :ensure t
+    :bind
+    (:map prog-mode-map
+          ("C-c '" . separedit)
+          :map minibuffer-local-map
+          ("C-c '" . separedit)
+          :map help-mode-map
+          ("C-c '" . separedit)
+          :map org-src-mode-map
+          ("C-c C-'" . separedit)
+          )
+    )
+
+  ;; fold code blocks
+  (use-package hideshow
+    :ensure t
+    :diminish (hs-minor-mode . " 󰮕")
+    :hook (prog-mode . hs-minor-mode)
+    )
+
+#+end_src
+
+** other tools
+Not classified yet.
+
+#+begin_src emacs-lisp
+  (use-package pyim
+    :ensure t
+    :custom
+    (default-input-method "pyim")
+    (pyim-cloudim 'baidu)
+    )
+
+  ;; Conflict-free Replicated Data Types
+  ;; provides collaborative editing support
+  (use-package crdt :ensure t)
+
+#+end_src
+
+* Emacs IDE
+** completion at point
+Although there are many other code completion frontends today, company is still the most stable one.
+
+#+begin_src emacs-lisp
+  (use-package company
+    :ensure t
+    :diminish (company-mode . "  ")
+    :defines (company-mode-map
+              company-backends
+              )
+    :custom
+    (company-show-numbers t)
+    (company-dabbrev-downcase nil)
+    :bind
+    (:map company-mode-map
+          ("C-c o" . company-other-backend)
+          )
+    :hook (prog-mode . company-mode)
+    )
+
+  (use-package company-box
+    :ensure t
+    :diminish (company-box-mode . "")
+    :hook (company-mode . company-box-mode)
+    )
+
+  (use-package company-tabnine
+    :ensure t
+    :custom
+    (company-tabnine-binaries-folder (concat user-emacs-directory "tabnine"))
+    :hook (company-mode
+           . (lambda () (add-to-list 'company-backends #'company-tabnine)))
+    )
+
+  (use-package company-coq
+    :ensure t
+    :hook (coq-mode . company-coq-mode)
+    )
+
+  (use-package company-maxima
+    :ensure t
+    :hook ((maxima-mode maxima-inferior-mode)
+           . (lambda ()
+               (require 'company-maxima)
+               (add-to-list 'company-backends
+                            '(company-maxima-symbols company-maxima-libraries))))
+    )
+
+  (use-package company-shell
+    :ensure t
+    :hook (shell-script-mode
+           . (lambda ()
+               (add-to-list 'company-backends
+                            '(company-shell company-shell-env))))
+    )
+
+  (use-package slime-company
+    :ensure t
+    :hook (slime-mode
+           . (lambda () (slime-setup '(slime-company))))
+    )
+
+  (use-package company-web
+    :ensure t
+    :hook (web-mode
+           . (lambda ()
+               (add-to-list 'company-backends
+                            '(company-web-html company-files))))
+    )
+#+end_src
+
+** syntax highlights
+They are FANTASTIC!!!
+
+#+begin_src emacs-lisp
+  (use-package color-identifiers-mode
+    :ensure t
+    :diminish (color-identifiers-mode . "  ")
+    :custom
+    (color-identifiers-coloring-method 'hash)
+    :hook
+    ((c-mode c++-mode java-mode js-mode python-mode rust-mode)
+     . color-identifiers-mode)
+    )
+
+  (use-package diff-hl
+    :ensure t
+    :when my/load-gui-config-p
+    :diminish (diff-hl-mode . "  ")
+    :commands (diff-hl-mode global-diff-hl-mode)
+    :hook
+    (magit-pre-refresh  . diff-hl-magit-pre-refresh)
+    (magit-post-refresh . diff-hl-magit-post-refresh)
+    )
+
+  (use-package dimmer
+    :ensure t
+    :when my/load-gui-config-p
+    :hook (prog-mode . dimmer-mode)
+    )
+
+  (use-package fancy-compilation
+    :ensure t
+    :after compile
+    :config
+    (fancy-compilation-mode)
+    )
+
+  (use-package hl-block-mode
+    :ensure t
+    :when my/load-gui-config-p
+    :hook (prog-mode . hl-block-mode)
+    )
+
+  (use-package hl-indent-scope
+    :ensure t
+    :when my/load-gui-config-p
+    :custom-face
+    (hl-indent-scope-even-face ((t (:background "#686868"))))
+    (hl-indent-scope-odd-face ((t (:background "#535353"))))
+    :hook (prog-mode . hl-indent-scope-mode)
+    )
+
+  (use-package highlight-parentheses
+    :ensure t
+    :diminish highlight-parentheses-mode
+    :custom (highlight-parentheses-colors
+             '("cyan" "yellow" "magenta" "red" "green" "blue"))
+    :hook (prog-mode . highlight-parentheses-mode)
+    )
+
+  (use-package highlight-escape-sequences
+    :ensure t
+    :hook (prog-mode . hes-mode)
+    )
+
+  (use-package highlight-doxygen
+    :ensure t
+    :hook ((c-mode c++-mode java-mode) . highlight-doxygen-mode)
+    )
+
+  (use-package rainbow-mode
+    :ensure t
+    :diminish (rainbow-mode . "  ")
+    :commands (rainbow-mode)
+    :init
+    ;; rainbow-mode is not compatible with hl-block
+    (add-hook
+     'rainbow-mode-hook
+     #'(lambda ()
+         (when hl-block-mode
+           (hl-block-mode -1)
+           (rainbow-turn-on))))
+    :hook ((html-mode css-mode js-mode) . rainbow-mode)
+    )
+
+#+end_src
+
+** syntax checker
+We got two backends: flycheck and flymake. Flymake is built-in but flycheck is more powerful.
+
+#+begin_src emacs-lisp
+  (use-package flycheck
+    :ensure t
+    :diminish (flycheck-mode . "  ")
+    :hook (prog-mode . flycheck-mode)
+    )
+
+  (use-package flycheck-aspell :ensure t)
+
+  (use-package flycheck-guile
+    :ensure t
+    :hook (geiser-mode . (lambda () (require 'flycheck-guile))))
+
+  (use-package flycheck-haskell
+    :ensure t
+    :hook (haskell-mode . flycheck-haskell-setup)
+    )
+
+  (use-package flycheck-pkg-config
+    :ensure t
+    :custom
+    (flycheck-pkg-config-path-vars
+     '(flycheck-clang-include-path
+       flycheck-gcc-include-path
+       flycheck-cppcheck-include-path
+       semantic-c-dependency-system-include-path)
+     )
+    :bind
+    (:map flycheck-mode-map
+     ("C-c ! @" . flycheck-pkg-config))
+    )
+
+  (use-package flymake
+    :diminish (flymake-mode . " 󰮄")
+    )
+
+#+end_src
+
+** code document
+We get two nice UI: box and overlay. Box is more flexible while overlay is cooler.
+
+#+begin_src emacs-lisp
+  (use-package eldoc
+    :diminish (eldoc-mode . " 󱀢")
+    )
+
+  (use-package eldoc-box
+    :ensure t
+    :diminish eldoc-box-hover-at-point-mode
+    :diminish eldoc-box-hover-mode
+    :commands (eldoc-box-hover-at-point-mode)
+    )
+
+  (use-package helpful
+    :ensure t
+    :bind
+    ("C-h C-." . helpful-at-point)
+    )
+#+end_src
+
+** code browsing
+gnu global is much faster than ctags for emacs.
+
+#+begin_src emacs-lisp
+  (use-package gtags-mode
+    :diminish " 󰓼"
+    :ensure t
+    )
+#+end_src
+
+** code analysis
+cedet semantic mode, a sophisticated mode with LL(1) code analyzer.
+
+I like to use it with c/c++, semantic-ia does realtime header parsing, which is really powerful.
+
+#+begin_src emacs-lisp
+  (use-package semantic
+    :custom
+    (semantic-idle-truncate-long-summaries nil)
+    :config
+    (global-semanticdb-minor-mode 1)
+    (global-semantic-idle-summary-mode 1)
+    (global-semantic-stickyfunc-mode 1)
+    (global-semantic-decoration-mode 1)
+    :bind
+    (:map semantic-mode-map
+          ("C-c , d" . semantic-ia-show-doc)
+          ("C-c , v" . semantic-ia-show-variants)
+          ("C-c , s" . semantic-ia-show-summery)
+          ("C-," . semantic-ia-fast-jump)
+          ("<C-down-mouse-1>" . semantic-ia-fast-mouse-jump)
+          )
+    :hook ((c-mode c++-mode)
+           . (lambda ()
+               (semantic-mode)
+               (require 'semantic/bovine/gcc)
+               ))
+    )
+#+end_src
+
+Emacs has introduced built-in Language Server Protocol (LSP) support
+since emacs29, with ~eglot~ package. But ~lsp~ does more.
+
+Actually there is already a ~sideline~ package, but sideline is enabled
+automatically with ~lsp-ui~, and that UI works without lsp connected. So
+we will use ~lsp-ui~ as our default UI in ~prog-mode~.
+
+#+begin_src emacs-lisp
+  (use-package lsp-mode
+    :ensure t
+    :defines lsp-mode-map
+    :custom
+    (lsp-keymap-prefix "C-S-l")
+    )
+
+  (use-package ccls :ensure t)
+  (use-package lsp-haskell :ensure t)
+
+  (use-package lsp-ui
+    :ensure t
+    :bind
+    (:map lsp-mode-map
+          ("C-S-l d" . lsp-ui-doc-toggle)
+          ("C-S-l i" . lsp-ui-imenu)
+          )
+    :hook (prog-mode . lsp-ui-mode)
+    )
+
+  (use-package lsp-treemacs :ensure t)
+#+end_src
+
+Finally we get something cooler in emacs29+, treesit is merged into emacs!
+Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitter][this article]].
+
+#+begin_src emacs-lisp
+  (setq treesit-language-source-alist
+        '((bash "https://github.com/tree-sitter/tree-sitter-bash")
+          (cmake "https://github.com/uyha/tree-sitter-cmake")
+          (css "https://github.com/tree-sitter/tree-sitter-css")
+          (elisp "https://github.com/Wilfred/tree-sitter-elisp")
+          (go "https://github.com/tree-sitter/tree-sitter-go")
+          (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
+          (html "https://github.com/tree-sitter/tree-sitter-html")
+          (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
+          (json "https://github.com/tree-sitter/tree-sitter-json")
+          (make "https://github.com/alemuller/tree-sitter-make")
+          (markdown "https://github.com/ikatyang/tree-sitter-markdown")
+          (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
+          (rust "https://github.com/tree-sitter/tree-sitter-rust")
+          (python "https://github.com/tree-sitter/tree-sitter-python")
+          (toml "https://github.com/tree-sitter/tree-sitter-toml")
+          (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+          (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+          (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
+
+  (setq major-mode-remap-alist
+        '((sh-mode . bash-ts-mode)
+          (css-mode . css-ts-mode)
+          (js-mode . js-ts-mode)
+          (json-mode . json-ts-mode)
+          (python-mode . python-ts-mode)
+          (ruby-mode . ruby-ts-mode)
+          (rust-mode . rust-ts-mode)
+          (typescript-mode . typescript-ts-mode)
+          (yaml-mode . yaml-ts-mode)))
+
+  ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
+  (mapc
+   #'(lambda (major-mode-remap)
+       (let ((major-mode-hook
+              (intern (concat (symbol-name (car major-mode-remap)) "-hook")))
+             (major-ts-mode-hook
+              (intern (concat (symbol-name (cdr major-mode-remap)) "-hook"))))
+         (add-hook major-ts-mode-hook
+                   `(lambda () (run-hooks (quote ,major-mode-hook))))))
+   major-mode-remap-alist)
+#+end_src
+
+** code formatter
+An automatic formatter to make your code a clean print.
+
+With this package we can also prettify the c macro expansion, which is not prettified by default like lisp macros.
+
+#+begin_src emacs-lisp
+  (use-package format-all
+    :ensure t
+    :autoload (format-all--set-chain
+               format-all--get-default-chain
+               format-all-buffer
+               )
+    :custom
+    (format-all-formatters '(("Shell" (shfmt "-i" "4"))))
+    :bind
+    (:map prog-mode-map
+          ("C-x C-<tab>" . format-all-region)
+          ("C-c C-<tab>" . format-all-buffer)
+          )
+    )
+
+  (use-package cmacexp
+    :functions (my:c-macro-expand)
+    :config
+    (defun my:c-macro-expand (start end subst)
+      "Pass (START END SUBST) to c-macroexpand and format the output buffer."
+      (interactive "r\nP")
+      (c-macro-expand start end subst)
+      (format-all--set-chain "C" (format-all--get-default-chain "C"))
+      (let ((c-macro-buf (get-buffer c-macro-buffer-name)))
+        (if (buffer-live-p c-macro-buf)
+            (progn
+              (switch-to-buffer c-macro-buf)
+              (format-all-buffer)
+              (switch-to-prev-buffer))
+          nil))
+      )
+
+    :bind
+    (:map c-mode-map
+          ([remap c-macro-expand] . #'my:c-macro-expand)
+          )
+    )
+#+end_src
+
+** project management
+Manage and navigate projects easily.
+
+#+begin_src emacs-lisp
+  (use-package projectile
+    :ensure t
+    :bind-keymap
+    ("C-c p" . projectile-command-map)
+    )
+
+  (use-package projection
+    :ensure t
+    :after project
+    :bind-keymap
+    ("C-x P" . projection-map)
+    )
+
+  (use-package projection-multi :ensure t)
+#+end_src
+
+Load ~magit~ configuration after ~windower~ to avoid keybinding conflicts.
+
+#+begin_src emacs-lisp
+  (use-package magit
+    :ensure t
+    :bind
+    (:map magit-mode-map ;; this needs to be overridden
+     ("M-1" . windower-toggle-single)
+     ("M-2" . windower-toggle-split)
+     )
+    )
+#+end_src
+
+License is necessary for your open-source projects
+#+begin_src emacs-lisp
+  (use-package lice :ensure t)
+  (use-package spdx :ensure t)
+#+end_src
+
+Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++ compilation, but it is not actively maintained, and depends on a ~.project~ file which is not that convenient.
+#+begin_src emacs-lisp
+  (use-package cc-mode
+    :hook
+    (c-mode
+     . (lambda () ;; one-key C file compilation
+         (unless (or (null (buffer-file-name))
+                     (file-exists-p "Makefile"))
+           (set (make-local-variable 'compile-command)
+                ;; emulate make's .c.o implicit pattern rule, but with
+                ;; different defaults for the CC, CPPFLAGS, and CFLAGS
+                ;; variables:
+                ;; $(CC) -c -o $@ $(CPPFLAGS) $(CFLAGS) $<
+                (let ((file (file-name-nondirectory buffer-file-name)))
+                  (format "%s -o %s %s %s %s"
+                          (or (getenv "CC") "gcc")
+                          (file-name-sans-extension file)
+                          (or (getenv "CPPFLAGS") "-DDEBUG=9")
+                          (or (getenv "CFLAGS") "-Wall -g")
+                          file))))))
+    :bind
+    (:map c-mode-map
+          ("C-c C-r" . compile))
+    )
+#+end_src
+
+** debugger
+It is not a fashionable thing to debug in Emacs, most modern IDEs integrates their own debugger. However, that does not mean Emacs is not good at do that. Emacs has good support for many debuggers, especially GDB.
+
+Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp.
+
+#+begin_src emacs-lisp
+  (use-package dap-mode
+    :ensure t
+    :custom
+    (dap-auto-configure-features '(sessions locals controls tooltip))
+    :config
+    (require 'dap-lldb)
+    (dap-register-debug-template "Rust::GDB Run Configuration"
+                                 (list :type "gdb"
+                                       :request "launch"
+                                       :name "GDB::Run"
+                                       :gdbpath "rust-gdb"
+                                       :target nil
+                                       :cwd nil))
+    )
+#+end_src
+
+** language-specific supports
+Most of them are not configured and deferred.
+
+#+begin_src emacs-lisp
+  (use-package haskell-mode
+    :ensure t
+    :custom
+    (interactive-haskell-mode)
+    :bind
+    (:map haskell-mode-map
+          ("C-c C-s" . haskell-hoogle)
+          ("C-c C-r" . haskell-interactive-bring)
+          ("C-c C-c" . haskell-compile))
+    (:map haskell-cabal-mode-map
+          ("C-c C-c" . haskell-compile))
+    )
+
+  (use-package python
+    :custom
+    (python-shell-virtualenv-root (my:weak-directory "~/.pyvenv"))
+    )
+
+  (use-package pyvenv
+    :ensure t
+    :diminish "  "
+    :custom
+    (pyvenv-activate python-shell-virtualenv-root)
+    :hook (python-mode . pyvenv-mode)
+    )
+
+  (use-package inf-lisp
+    :init
+    (setq inferior-lisp-program "ros -Q run")
+    )
+
+  (use-package slime
+    :ensure t
+    :diminish " Ϛむ"
+    )
+
+  (use-package slime-repl-ansi-color
+    :ensure t
+    :hook slime-repl-mode
+    )
+
+  (use-package auto-rename-tag
+    :ensure t
+    :diminish " 󰅴"
+    :hook (nxml-mode . auto-rename-tag-mode)
+    )
+
+  (use-package yaml-pro
+    :ensure t
+    :diminish " 🅨"
+    :hook (yaml-mode . yaml-pro-mode)
+    )
+
+  (use-package markdown-mode
+    :ensure t
+    :mode ("README\\.md\\'" . gfm-mode)
+    :custom
+    (markdown-fontify-code-blocks-natively t)
+    :custom-face
+    (markdown-code-face ((t :background "#242631")))
+    :bind
+    (:map markdown-mode-map
+          ("C-c C-x C-u" . markdown-toggle-url-hiding)
+          ("C-c C-x C-l" . org-latex-preview))
+    )
+
+  (use-package geiser
+    :ensure t
+    :defines (my:geiser-directory)
+    :init
+    (defun my:geiser-file-path (name)
+      (file-name-concat
+       (my:strong-directory (file-name-concat user-emacs-directory "geiser/"))
+       name))
+    :custom
+    (geiser-repl-history-filename (my:geiser-file-path ".geiser_history"))
+    )
+
+  (use-package geiser-chez
+    :ensure t
+    :after geiser
+    :custom
+    (geiser-chez-binary "chez")
+    (geiser-chez-init-file (my:geiser-file-path ".chez-geiser"))
+    )
+
+  (use-package geiser-guile
+    :ensure t
+    :after geiser
+    :custom
+    (geiser-guile-init-file (my:geiser-file-path ".guile-geiser"))
+    )
+
+  (use-package bison-mode :ensure t)
+  (use-package disaster :ensure t)
+  (use-package gnuplot :ensure t)
+  (use-package go-mode :ensure t)
+  (use-package graphviz-dot-mode :ensure t)
+  (use-package lua-mode :ensure t)
+  (use-package maxima :ensure t)
+  (use-package nhexl-mode :ensure t)
+  (use-package plantuml-mode :ensure t)
+  (use-package tuareg :ensure t)
+  (use-package proof-general :ensure t)
+  (use-package purescript-mode :ensure t)
+  (use-package riscv-mode :ensure t)
+  (use-package rust-mode :ensure t)
+  (use-package typescript-mode :ensure t)
+  (use-package web-mode :ensure t)
+  (use-package tex :ensure auctex)
+#+end_src
+
+* Org Editor
+** org-mode
+It is really interesting to write ~org-mode~ configurations in an org document.
+
+#+begin_src emacs-lisp
+  (use-package org
+    :defines org-mode-map
+    :custom-face
+    (org-level-1 ((t (:inherit outline-1 :height 1.25))))
+    (org-level-2 ((t (:inherit outline-2 :height 1.2))))
+    (org-level-3 ((t (:inherit outline-3 :height 1.15))))
+    (org-level-4 ((t (:inherit outline-4 :height 1.1))))
+    (org-level-5 ((t (:inherit outline-5 :height 1.0))))
+    (org-document-title ((t (:height 1.5 :underline nil))))
+    :custom
+    (org-directory (my:weak-directory "/wsp/doc/org"))
+    (org-agenda-files (list (my:strong-directory (file-name-concat org-directory "roam/agenda"))))
+    (org-babel-load-languages '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t)))
+    (org-export-backends '(ascii html latex man md odt texinfo))
+    (org-export-with-sub-superscripts nil)
+    (org-fontify-whole-block-delimiter-line t)
+    (org-fontify-whole-heading-line t)
+    (org-format-latex-options '(:foreground default :background default :scale 1.5 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
+    (org-hide-emphasis-markers t)
+    (org-hide-leading-stars t)
+    (org-hide-macro-markers t)
+    (org-highlight-latex-and-related '(native latex script entities))
+    (org-image-actual-width nil)
+    (org-latex-compiler "xelatex")
+    (org-latex-listings 'minted)
+    (org-latex-package-alist '(("" "minted")))
+    (org-latex-pdf-process
+     '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
+       "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
+    (org-modules
+     '(ol-bbdb ol-bibtex ol-docview ol-doi ol-eww ol-gnus ol-info ol-irc ol-mhe org-mouse ol-rmail org-tempo ol-w3m))
+    (org-plantuml-jar-path "/usr/share/java/plantuml/plantuml.jar")
+    (org-pretty-entities t)
+    (org-pretty-entities-include-sub-superscripts nil)
+    (org-support-shift-select t)
+    (org-src-block-faces 'nil)
+    (org-src-lang-modes
+     '(("C" . c)
+       ("C++" . c++)
+       ("asymptote" . asy)
+       ("bash" . sh)
+       ("beamer" . latex)
+       ("calc" . fundamental)
+       ("cpp" . c++)
+       ("ditaa" . ditaa)
+       ("dot" . graphviz-dot)
+       ("elisp" . emacs-lisp)
+       ("haskell" . haskell)
+       ("ocaml" . tuareg)
+       ("python" . python)
+       ("scheme" . scheme)
+       ("screen" . shell-script)
+       ("shell" . sh)
+       ("sqlite" . sql)
+       ("text" . text)))
+    (org-startup-folded 'content)
+    (org-startup-with-inline-images my/load-gui-config-p)
+    (org-todo-keywords '((sequence "TODO" "DONE" "PEND")))
+    (org-use-sub-superscripts nil)
+
+    :bind
+    (("C-c a" . org-agenda)
+     ("C-c c" . org-capture)
+     ("C-c l" . org-store-link)
+     :map org-mode-map ;; override keybindings
+     ("C-S-<left>"  . windower-move-border-left)
+     ("C-S-<right>" . windower-move-border-right)
+     ("C-S-<up>"    . windower-move-border-above)
+     ("C-S-<down>"  . windower-move-border-below)
+     )
+    )
+
+  (use-package simple
+    :diminish (visual-line-mode . " 󱇂")
+    :hook (org-mode . visual-line-mode)
+    :bind
+    ("C-c v l" . visual-line-mode)
+    )
+
+  (use-package org-appear
+    :ensure t
+    :custom
+    (org-appear-autoentities t)
+    (org-appear-autokeywords t)
+    (org-appear-autolinks t)
+    (org-appear-autosubmarkers t)
+    (org-appear-inside-latex t)
+    :hook (org-mode . org-appear-mode)
+    )
+
+  (use-package org-fragtog
+    :ensure t
+    :when my/load-gui-config-p
+    :custom
+    (org-fragtog-ignore-predicates '(org-at-block-p))
+    :hook (org-mode . org-fragtog-mode)
+    )
+
+  (use-package org-edit-indirect
+    :ensure t
+    :hook (org-mode . org-edit-indirect-mode)
+    )
+
+  (use-package org-modern
+    :ensure t
+    :when my/load-gui-config-p
+    :custom
+    (org-modern-block-fringe nil)
+    (org-modern-table nil)
+    (org-modern-block-name '("Σ " "∎ "))
+    (org-modern-star 'replace)
+    (org-modern-hide-stars ".")
+    (org-modern-keyword "☯ ")
+    (org-modern-priority-faces '((?A :foreground "black" :background "red")
+                                 (?B :foreground "black" :background "orange")
+                                 (?C :foreground "black" :background "yellow")))
+    (org-modern-todo-faces '(("TODO" :foreground "white" :background "deep sky blue" )
+                             ("DOWN" :foreground "black" :background "dark green")
+                             ("PEND" :foreground "black" :background "dark orange")))
+    :hook
+    (org-mode . org-modern-mode)
+    (org-agenda-finalize . org-modern-agenda)
+    )
+
+  (use-package org-download
+    :ensure t
+    :config
+    (advice-add
+     #'org-download--dir-1
+     :override ;; this does not work for temporary buffers,
+     (lambda () (concat "./" (file-name-base (buffer-file-name)) ".assets")))
+    :custom
+    (org-download-heading-lvl nil)
+    (org-download-screenshot-method "spectacle -br -o %s")
+    :bind
+    (:map org-mode-map
+          ("C-c d c" . org-download-clipboard)
+          ("C-c d e" . org-download-edit)
+          ("C-c d i" . org-download-image)
+          ("C-c d s" . org-download-screenshot)
+          ("C-c d y" . org-download-yank)
+          )
+    :hook (org-mode . org-download-enable)
+    )
+
+  (use-package valign
+    :ensure t
+    :diminish (valign-mode . " 󰉠")
+    :when my/load-gui-config-p
+    :hook ((org-mode markdown-mode) . valign-mode)
+    )
+
+  (use-package citar
+    :ensure t
+    :after org
+    :init
+    (setq my/citar-bib-directory (my:weak-directory "/wsp/doc/bib"))
+    :custom
+    (citar-bibliography (when my/citar-bib-directory
+                          (directory-files my/citar-bib-directory t ".*\\.bib")))
+    :hook
+    ((org-mode LaTeX-mode). citar-capf-setup)
+    )
+
+  ;; embark integration
+  (use-package citar-embark
+    :ensure t
+    :diminish (citar-embark-mode . "")
+    :after (citar embark)
+    :no-require
+    :config
+    (citar-embark-mode)
+    )
+
+  (use-package org-drill
+    :ensure t
+    :bind
+    (:map org-mode-map
+          ("C-c D" . org-drill)
+          )
+    )
+
+  ;; play org document as slides
+  (use-package org-tree-slide :ensure t)
+  ;; for better org html output
+  (use-package htmlize :ensure t)
+#+end_src
+
+** org-roam
+Roam builds a note database by inserting a unique ID to your org notes.
+
+#+begin_src emacs-lisp
+  (use-package emacsql :ensure t)
+  (use-package org-roam
+    :ensure t
+    :preface
+    (defvar org-roam-cmd-map (make-sparse-keymap)
+      "A keymap for org-roam related commands.")
+    :defines org-roam-cmd-map
+    :custom
+    (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
+    (org-roam-database-connector 'sqlite-builtin)
+    (org-roam-dailies-directory "dailies/")
+    (org-roam-db-location (my:weak-path (file-name-concat org-roam-directory "org-roam.db")))
+    ;; Use FILE-TRUENAME to avoid expansion on this directory
+    (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
+    (org-roam-node-display-template
+     (concat "${title} " (propertize "${tags:30}" 'face 'org-tag)))
+    :init
+    (defun org-roam-consult-grep ()
+      "Grep in org-roam-directory with `consult-grep'."
+      (interactive)
+      (consult-grep org-roam-directory ""))
+    :config
+    (org-roam-db-autosync-mode)
+    :bind-keymap
+    ("C-c n" . org-roam-cmd-map)
+    :bind
+    (:map org-roam-cmd-map
+          ("l" . org-roam-buffer-toggle)
+          ("f" . org-roam-node-find)
+          ("g" . org-roam-consult-grep)
+          ("i" . org-roam-node-insert)
+          ("c" . org-roam-capture)
+          ("j" . org-roam-dailies-capture-today)
+          )
+    )
+
+  (use-package org-roam-ql
+    :ensure t
+    :after (org-roam)
+    :bind
+    (:map org-roam-cmd-map
+          ("s" . org-roam-ql-search)
+          ("v" . org-roam-ql-buffer-dispatch)
+          )
+    )
+
+  (use-package org-roam-ui
+    :ensure t
+    :diminish
+    (org-roam-ui-mode . " 󱗿")
+    (org-roam-ui-follow-mode . "  ")
+    :custom (org-roam-ui-open-on-start nil)
+    :bind
+    (:map org-roam-cmd-map
+          ("u" . org-roam-ui-open)
+          ("z" . org-roam-ui-zoom)
+          )
+    )
+
+  (use-package org-roam-timestamps
+    :diminish org-roam-timestamps-mode
+    :ensure t
+    :after org-roam
+    :hook (org-mode . org-roam-timestamps-mode)
+    )
+#+end_src
+
+* Emacs Desktop
+** applications
+There is a joke that Emacs is actually an operating system shell on lisp.
+
+These applications are actually desktop-level, BTW I use Emacs.
+
+#+begin_src emacs-lisp
+  (use-package elfeed
+    :ensure t
+    :commands (elfeed)
+    :custom
+    (elfeed-db-directory (concat user-emacs-directory "elfeed"))
+    (elfeed-enclosure-default-dir (concat user-emacs-directory "elfeed-enclosure"))
+    (elfeed-feeds
+     '("https://planet.emacslife.org/atom.xml"
+       "https://phys.org/rss-feed/physics-news/physics/"
+       "https://phys.org/rss-feed/space-news/astronomy/"
+       "https://phys.org/rss-feed/earth-news/earth-sciences/"
+       "https://xkcd.com/rss.xml"
+       )
+     )
+    )
+
+  (use-package emms
+    :ensure t
+    :commands (emms)
+    :config
+    (require 'emms-setup)
+    (emms-all)
+    (emms-default-players)
+    )
+
+  (use-package plz :ensure t)
+  (use-package go-translate
+    :ensure t
+    :autoload (gt-start
+               gt-taker
+               gt-translator
+               gt-plz-http-client)
+    :functions (my:gt-do-translate-quickly)
+    :preface
+    (defun my:gt-do-translate-quickly ()
+      "Do a quick translate query with minibuffer prompt."
+      (interactive)
+      (gt-start
+       (gt-translator
+        :taker (gt-taker :prompt t)
+        :engines (gt-stardict-engine)
+        :render (gt-render))))
+
+    :custom
+    (gt-default-http-client (gt-plz-http-client))
+    (gt-langs '(en zh))
+    (gt-preset-translators
+     `((ts-word
+        . ,(gt-translator
+            :taker (gt-taker)
+            :engines (list (gt-youdao-dict-engine)
+                           (gt-bing-engine)
+                           (gt-google-rpc-engine))
+            :render (gt-buffer-render)))
+       (ts-offline
+        . ,(gt-translator
+            :taker (gt-taker)
+            :engines (list (gt-stardict-engine))
+            ;; download stardict from https://kdr2.com/resource/stardict.html
+            :render (gt-render)))
+       (ts-offline-prompt
+        . ,(gt-translator
+            :taker (gt-taker :prompt t)
+            :engines (list (gt-stardict-engine))
+            :render (gt-render)))
+       (ts-paragraph
+        . ,(gt-translator
+            :taker (gt-taker :text 'paragraph :pick 'paragraph)
+            :engines (gt-google-rpc-engine)
+            :render (gt-buffer-render)))
+       (ts-buffer
+        . ,(gt-translator
+            :taker (gt-taker :text 'buffer :pick 'paragraph)
+            :engines (gt-google-rpc-engine)
+            :render (gt-buffer-render)))
+       (ts-buffer-replace
+        . ,(gt-translator
+            :taker (gt-taker :text 'buffer :pick 'paragraph)
+            :engines (gt-google-rpc-engine)
+            :render (gt-insert-render :type 'replace)))
+       (ts-buffer-prompt
+        . ,(gt-translator
+            :taker (gt-taker :prompt 'buffer :text 'buffer :pick 'paragraph)
+            :engines (gt-google-rpc-engine)
+            :render (gt-buffer-render)))
+       ))
+
+    :bind
+    ("M-\"" . gt-do-translate) ;; press C-n and C-p to loop languages
+    ("C-M-\"" . my:gt-do-translate-quickly)
+    )
+
+  (use-package pdf-tools
+    :ensure t
+    :magic ("%PDF" . pdf-view-mode)
+    :config
+    (pdf-tools-install)
+    )
+
+  ;; not configured yet
+  (use-package djvu :ensure t)
+  (use-package doc-toc :ensure t)
+  (use-package nov :ensure t)
+#+end_src
+
+** developer tools
+Tools for Emacs development.
+
+#+begin_src emacs-lisp
+  ;; currently there is nothing
+
+#+end_src
+
+* Epilogue
+** miscellaneous utilities
+My own packages, you can get them from github with ~el-get~.
+#+begin_src emacs-lisp
+  (use-package my-misc
+    :el-get gynamics/my-misc.el
+    :bind
+    ("M-Q"   . my:unfill-paragraph)
+    ("C-x %" . my:eval-and-replace)
+    ("C-x 9" . my:dedicate-window-toggle)
+    ("<f9>"  . my:adjust-alpha-background)
+    )
+
+  (use-package semantic-pkg-config
+    :el-get gynamics/semantic-pkg-config.el
+    :commands (semantic-pkg-config)
+    )
+
+  (use-package railgun
+    :el-get gynamics/railgun.el
+    :commands (railgun-mode)
+    )
+#+end_src
+
+** miscellaneous keybindings
+
+#+begin_src emacs-lisp
+  (bind-keys
+   ([remap list-buffers]    . ibuffer)
+   ([remap eval-last-sexp]  . pp-eval-last-sexp)
+   ([remap eval-expression] . pp-eval-expression)
+   ([remap dabbrev-expand]  . hippie-expand)
+   ("C-x M-e" . pp-macroexpand-last-sexp)
+   ("C-x M-s" . macrostep-mode)
+   ("C-c v SPC" . whitespace-mode)
+   )
+
+  ;; enable some disabled functions
+  (put 'downcase-region 'disabled nil) ;; C-x C-l
+  (put 'upcase-region 'disabled nil)   ;; C-x C-u
+#+end_src
+
+** miscellaneous configurations
+
+#+begin_src emacs-lisp
+  (use-package recentf
+    :init
+    (recentf-mode)
+    :config
+    ;; do not waste time on checking remote files
+    (add-to-list 'recentf-keep 'file-remote-p)
+    )
+
+  ;; prettify symbols
+  (customize-set-variable 'prettify-symbols-unprettify-at-point 'right-edge)
+  (add-hook 'prog-mode-hook #'prettify-symbols-mode)
+
+  ;; display line numbers
+  (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+
+  ;; cleanup whitespaces on save
+  (defun cleanup-wsp-on-save ()
+    (make-local-variable 'before-save-hook)
+    (add-hook 'before-save-hook ;; make it buffer-local
+              #'(lambda () (whitespace-cleanup)) nil t)
+    )
+  (add-hook 'prog-mode-hook #'cleanup-wsp-on-save)
+
+  ;; do not make backups
+  (customize-set-variable 'make-backup-files nil)
+  ;; or, save backups in a specific directory if necessary
+  ;; (customize-set-variable
+  ;;  'backup-directory-alist
+  ;;  `(("." . ,(concat user-emacs-directory "~/.emacs/backups")))
+
+#+end_src
+
+** footer
+
+#+begin_src emacs-lisp
+  (provide 'koishimacs)
+  ;;; koishimacs.el ends here
+#+end_src
+
+** postscript
+Evaluate these expressions after bootstrap to complete the installation, never tangle this block!
+
+#+begin_src emacs-lisp :tangle no
+  ;; install font for `nerd-icons'
+  (nerd-icons-install-fonts)
+
+  ;; install tabnine binary for `company-tabnine', for linux only x86_64 is supported.
+  ;; see https://docs.tabnine.com/main/welcome/readme/system-requirements#tabnine-client-ide-plugin
+  (company-tabnine-install-binary)
+
+  ;; run this code once to install all treesit libraries at once (not necessary)
+  (mapc #'treesit-install-language-grammar
+        (mapcar #'car treesit-language-source-alist))
+
+#+end_src
