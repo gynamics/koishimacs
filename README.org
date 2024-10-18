@@ -29,7 +29,7 @@ Read [[file:koishimacs.org::*preface][koishimacs.org:Prelude:preface]] if you ar
      git clone https://github.com/gynamics/koishimacs
    #+end_src
 
-2. Please at least have a look at [[file:init.el][init.el:package-archives]] and section [[file:koishimacs.org::*environment][koishimacs.org:Prelude:environment]] to get ~ELPA~ mirror urls, ~PATH~, ~http_proxy~ and other environment variables configured correctly.
+2. Please at least have a look at [[file:koishimacs.org::*package manager][koishimacs.org:Prelude:package manager]] and section [[file:koishimacs.org::*environment][koishimacs.org:Prelude:environment]] to get ~ELPA~ mirror urls, ~PATH~, ~http_proxy~ and other environment variables configured correctly.
 
    You may also want to configure ~org-directory~ and ~org-roam-directory~ at the same time, just search and modify these ~:custom~ cells in section [[file:koishimacs.org::*Org Editor][koishimacs.org:Org Editor]], it is not a difficult task.
 
