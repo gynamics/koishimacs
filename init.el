@@ -45,6 +45,7 @@
  '(indent-tabs-mode nil)
  '(inhibit-startup-screen t)
  '(native-comp-async-report-warnings-errors nil)
+ '(package-quickstart t)
  '(scroll-bar-mode nil)
  '(size-indication-mode t)
  '(tab-always-indent t)
@@ -60,20 +61,6 @@
  '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 130 :width normal))))
  '(fixed-pitch-serif ((t (:weight bold :family "DejaVu Sans Mono")))))
 
-;;set package archives
-(customize-set-variable 'package-archives '(
-    ;; GNU ELPA
-    ;; ("gnu"    . "https://elpa.gnu.org/packages/")
-    ;; ("nongnu" . "https://elpa.nongnu.org/nongnu/")
-    ;; ("melpa"  . "https://melpa.org/packages/")
-    ;; TUNA mirrors (for China Mainland)
-    ("gnu"   . "https://mirrors.tuna.tsinghua.edu.cn/elpa/gnu/")
-    ("nongnu" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/nongnu/")
-    ("melpa" . "https://mirrors.tuna.tsinghua.edu.cn/elpa/melpa/")
-    ;; ("melpa-stable" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/stable-melpa/")
-    ;; ("org" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/org/")
-    ))
-
 ;; Don't attempt to find/apply special file handlers to files loaded during startup.
 (let ((file-name-handler-alist nil)
       (literate-config (concat user-emacs-directory "koishimacs.org"))
@@ -85,7 +72,7 @@
         (load-file code-config)
       (progn
         ;; Otherwise use org-babel to tangle the literate configuration
-        (use-package org :commands org-babel-load-file)
+        (require 'org)
         (org-babel-load-file literate-config)))
     ))
 
