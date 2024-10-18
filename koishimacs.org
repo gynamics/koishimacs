@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.0.0
+  ;; Version: 5.1.0
   ;; Package-Requires:
 
   ;;; Commentary:
@@ -127,9 +127,27 @@ Moreover, another annoying thing this is static paths to various files as argume
 #+end_src
 
 ** package manager
-As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~.
+As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~. First we should pick up a fast ELPA mirror for ~package.el~ :
 
-To accelerate emacs startup we do lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
+#+begin_src emacs-lisp
+  (custom-set-variables
+   '(package-archives
+     '(;; GNU ELPA (default)
+       ;; ("gnu"    . "https://elpa.gnu.org/packages/")
+       ;; ("nongnu" . "https://elpa.nongnu.org/nongnu/")
+       ;; ("melpa"  . "https://melpa.org/packages/")
+       ;; TUNA mirrors (for China Mainland)
+       ("gnu"   . "https://mirrors.tuna.tsinghua.edu.cn/elpa/gnu/")
+       ("nongnu" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/nongnu/")
+       ("melpa" . "https://mirrors.tuna.tsinghua.edu.cn/elpa/melpa/")
+       ;; ("melpa-stable" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/stable-melpa/")
+       ;; ("org" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/org/")
+       )))
+#+end_src
+
+To accelerate emacs startup we can do:
+1. pacakge quickstart. This feature is provided after emacs 27, which supports compile all loaddefs into one single ~package-quickstart.el~ to avoid openning too much loaddef files.
+2. lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
 
 #+begin_src emacs-lisp
   (use-package use-package
@@ -140,9 +158,9 @@ To accelerate emacs startup we do lazy loading. This feature can be enabled auto
     (use-package-compute-statistics t)
     )
 
-  ;; involve this to make use-package find personal-keybindings
-  (use-package bind-key :ensure t :demand t)
-  (use-package diminish :ensure t :demand t)
+  ;; involve this to make use-package find personal-keybindings on compiling
+  ;; (use-package bind-key :demand t)
+  (use-package diminish :ensure t)
 #+end_src
 
 Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
@@ -156,13 +174,13 @@ BTW, most user-defined configuration interfaces has prefix ~my:~, and variables 
     "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
   If BYTE-COMPILE-P is given as t, byte compile it."
     (interactive "P")
-    (let ((config-org (concat user-emacs-directory "koishimacs.org"))
-          (config-el (concat user-emacs-directory "koishimacs.el")))
-      (org-babel-tangle-file config-org config-el)
+    (let ((literate-config (concat user-emacs-directory "koishimacs.org"))
+          (code-config (concat user-emacs-directory "koishimacs.el")))
+      (org-babel-tangle-file literate-config code-config)
       (when byte-compile-p
         (let ((byte-compile-warnings
                '(not free-vars unresolved noruntime lexical make-local)))
-          (byte-compile-file config-el)))
+          (byte-compile-file code-config)))
       )
     )
 #+end_src
@@ -195,8 +213,7 @@ With package ~el-get~ we will be able to get packages from other sources like gi
 #+begin_src emacs-lisp
   (use-package el-get
     :ensure t
-    :autoload (el-get-bundle)
-    :preface
+    :init
     ;; idea from kurubushi's use-package--el-get.el
     (setq use-package-keywords (cons :el-get use-package-keywords))
     (defalias 'use-package-normalize/:el-get 'use-package-normalize-symlist)
@@ -280,19 +297,24 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
 The theme package of doomacs is good.
 
 #+begin_src emacs-lisp
+  ;; Temporary Fix: currently this is missed in doom's dependency
+  (use-package all-the-icons :ensure t)
+
   (use-package doom-themes
     :ensure t
     :when my/load-gui-config-p
-    :demand t
     :custom
     (doom-themes-enable-bold t)
     (doom-themes-enable-italic t)
     (doom-themes-treemacs-theme "doom-colors")
-    :config
-    (load-theme 'doom-zenburn t)
-    (doom-themes-visual-bell-config)
-    (doom-themes-treemacs-config)
-    (doom-themes-org-config)
+    :hook
+    ;; load it earilier to have a smooth startup
+    (after-init
+     . (lambda ()
+         (load-theme 'doom-zenburn t)
+         (doom-themes-visual-bell-config)
+         (doom-themes-treemacs-config)
+         (doom-themes-org-config)))
     )
 #+end_src
 
@@ -304,10 +326,11 @@ many other cool things.
   (use-package doom-modeline
     :ensure t
     :when my/load-gui-config-p
-    :demand t
     :custom
     (doom-modeline-minor-modes t)
-    (doom-modeline-mode t)
+    :hook
+    ;; load it earilier to have a smooth startup
+    (after-init . doom-modeline-mode)
     )
 
   (use-package hide-mode-line
@@ -560,7 +583,7 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
                popwin:stick-popup-window
                popwin:close-popup-window
                )
-    :preface
+    :init
     (defun my:popwin:scratch ()
       "Show *scratch* in a popwin, if not exist, create it."
       (interactive)
@@ -575,7 +598,6 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
           (my:popwin:scratch)
           (popwin:stick-popup-window))))
 
-    :init
     ;; enable popwin mode
     (popwin-mode)
 
@@ -599,9 +621,8 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     )
 
   (use-package eshell
-    :functions (my:popwin:eshell)
     :commands (eshell)
-    :preface
+    :init
     (setq eshell-buffer-name "*eshell*")
 
     (defun my:popwin:eshell (&optional arg)
@@ -620,11 +641,10 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
 
   (use-package vterm
     :ensure t
-    :functions (my:popwin:vterm)
     :commands (vterm)
     :autoload (vterm-send-string
                vterm-send-return)
-    :preface
+    :init
     (setq vterm-buffer-name "*vterm*")
 
     (defun my:popwin:vterm (&optional arg)
@@ -644,9 +664,8 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     )
 
   (use-package ibuffer
-    :functions (my:popwin:ibuffer)
     :commands (ibuffer)
-    :preface
+    :init
     (defun my:popwin:ibuffer ()
       "Show *Ibuffer* in a popwin, if not exist, create it."
       (interactive)
@@ -657,9 +676,8 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
 
   (use-package register-list
     :ensure t
-    :functions (my:popwin:register-list)
-    :autoload (register-list-refresh)
-    :preface
+    :commands (register-list-refresh)
+    :init
     (defun my:popwin:register-list ()
       "Show *Register-List* in a popwin, if not exist, create it."
       (interactive)
@@ -673,11 +691,6 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
 Dired is powerful but incomplete.
 
 #+begin_src emacs-lisp
-  (use-package dired-git
-    :ensure t
-    :commands (dired-git-mode)
-    )
-
   (use-package dired-git-info
     :ensure t
     :commands (dired-git-info-mode)
@@ -697,9 +710,12 @@ Dired is powerful but incomplete.
           )
     )
 
+  (use-package wdired
+    :commands (wdired-change-to-wdired-mode
+               wdired-change-to-dired-mode)
+    )
+
   (use-package dired
-    :functions (wdired-change-to-wdired-mode
-                wdired-change-to-dired-mode)
     :init
     (dirvish-override-dired-mode)
     :custom
@@ -768,6 +784,11 @@ A big but useless thing.
     :when (display-graphic-p)
     :diminish (dashboard-mode . " 󰕮")
     :init
+    ;; because these packages are placed later,
+    ;; we have to specify these autoloads here.
+    (autoload 'org-agenda "org-agenda")
+    (autoload 'elfeed "elfeed")
+    (autoload 'emms "emms-playlist-mode")
     (dashboard-setup-startup-hook)
     :custom-face
     (dashboard-banner-logo-title ((t (:inherit italic :height 1.5 :family "Chopin Script"))))
@@ -775,7 +796,6 @@ A big but useless thing.
     (dashboard-banner-logo-title "Wish Outspeak  Without speak")
     (dashboard-buffer-last-width 80)
     (dashboard-center-content    t)
-    (dashboard-footer            "Richard Stallman is proud of you.")
     (dashboard-footer-messages
      '("Everything will be all right under the hat of unconsciousness."
        "Embrace a stinging mind, enjoy a thorny road."
@@ -1028,17 +1048,22 @@ More previews and visual feedback.
     :ensure t
     :after yasnippet
     :bind
-    ;; use the same prefix C-c &
     (:map yas-minor-mode-map
-          ("C-c & w" . aya-create)
-          ("C-c & TAB" . aya-expand)
-          ("C-c & SPC" . aya-expand-from-history)
-          ("C-c & d" . aya-delete-from-history)
-          ("C-c & c" . aya-clear-history)
-          ("C-c & n" . aya-next-in-history)
-          ("C-c & p" . aya-previous-in-history)
-          ("C-c & s" . aya-persist-snippet)
-          ("C-c & o" . aya-open-line)
+          :prefix-map aya-map
+          :prefix "C-:"
+          ("w" . aya-create)
+          ("TAB" . aya-expand)
+          ("SPC" . aya-expand-from-history)
+          ("d" . aya-delete-from-history)
+          ("c" . aya-clear-history)
+          ("n" . aya-next-in-history)
+          ("p" . aya-previous-in-history)
+          ("s" . aya-persist-snippet)
+          ("o" . aya-open-line)
+          ;; yasnippet commands bind to prefix C-c &
+          ("C-:" . yas-insert-snippet)
+          ("C-v" . yas-visit-snippet-file)
+          ("C-n" . yas-new-snippet)
           )
     )
 #+end_src
@@ -1097,7 +1122,8 @@ Less is more.
     ("M-(" . sp-wrap-round)            ;; a -> (a)
     ("M-)" . sp-rewrap-sexp)   ;; (a b) -> [a b]
     ("M-W" . sp-copy-sexp)
-    :hook (prog-mode . smartparens-mode)
+    :hook
+    (prog-mode . smartparens-mode)
     )
 
 #+end_src
@@ -1405,10 +1431,12 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
     :custom
     (semantic-idle-truncate-long-summaries nil)
     :config
-    (global-semanticdb-minor-mode 1)
-    (global-semantic-idle-summary-mode 1)
-    (global-semantic-stickyfunc-mode 1)
-    (global-semantic-decoration-mode 1)
+    (require 'semantic/bovine/gcc)
+    (defun my:semantic-enable-minor-modes ()
+      (global-semanticdb-minor-mode 1)
+      (semantic-idle-summary-mode 1)
+      (semantic-stickyfunc-mode 1)
+      (semantic-decoration-mode 1))
     :bind
     (:map semantic-mode-map
           ("C-c , d" . semantic-ia-show-doc)
@@ -1418,10 +1446,7 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
           ("<C-down-mouse-1>" . semantic-ia-fast-mouse-jump)
           )
     :hook ((c-mode c++-mode)
-           . (lambda ()
-               (semantic-mode)
-               (require 'semantic/bovine/gcc)
-               ))
+           . (lambda () (semantic-mode) (my:semantic-enable-minor-modes)))
     )
 #+end_src
 
@@ -1483,6 +1508,7 @@ Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitte
   (setq major-mode-remap-alist
         '((sh-mode . bash-ts-mode)
           (css-mode . css-ts-mode)
+          (haskell-mode . haskell-ts-mode)
           (js-mode . js-ts-mode)
           (json-mode . json-ts-mode)
           (python-mode . python-ts-mode)
@@ -1561,11 +1587,20 @@ Manage and navigate projects easily.
   (use-package projection
     :ensure t
     :after project
+    :hook
+    (after-init . global-projection-hook-mode)
     :bind-keymap
     ("C-x P" . projection-map)
     )
 
-  (use-package projection-multi :ensure t)
+  (use-package projection-multi
+    :ensure t
+    ;; Allow interactively selecting available compilation targets from the current
+    ;; project type.
+    :bind
+    (:map project-prefix-map
+          ("RET" . projection-multi-compile))
+    )
 #+end_src
 
 Load ~magit~ configuration after ~windower~ to avoid keybinding conflicts.
@@ -1641,8 +1676,7 @@ Most of them are not configured and deferred.
 #+begin_src emacs-lisp
   (use-package haskell-mode
     :ensure t
-    :custom
-    (interactive-haskell-mode)
+    :autoload haskell-hoogle
     :bind
     (:map haskell-mode-map
           ("C-c C-s" . haskell-hoogle)
@@ -1650,6 +1684,15 @@ Most of them are not configured and deferred.
           ("C-c C-c" . haskell-compile))
     (:map haskell-cabal-mode-map
           ("C-c C-c" . haskell-compile))
+    )
+
+  (use-package haskell-ts-mode
+    :ensure t
+    :custom
+    (haskell-ts-highlight-signature t)
+    :bind
+    (:map haskell-ts-mode-map
+          ("C-c C-s" . haskell-hoogle))
     )
 
   (use-package python
@@ -1732,6 +1775,7 @@ Most of them are not configured and deferred.
     (geiser-guile-init-file (my:geiser-file-path ".guile-geiser"))
     )
 
+  (use-package adoc-mode :ensure t :mode ("\\.adoc\\'" . adoc-mode))
   (use-package bison-mode :ensure t)
   (use-package disaster :ensure t)
   (use-package gnuplot :ensure t)
@@ -1773,7 +1817,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-export-with-sub-superscripts nil)
     (org-fontify-whole-block-delimiter-line t)
     (org-fontify-whole-heading-line t)
-    (org-format-latex-options '(:foreground default :background default :scale 1.5 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
+    (org-format-latex-options '(:foreground default :background default :scale 1.0 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
     (org-hide-emphasis-markers t)
     (org-hide-leading-stars t)
     (org-hide-macro-markers t)
@@ -1892,11 +1936,13 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-download-screenshot-method "spectacle -br -o %s")
     :bind
     (:map org-mode-map
-          ("C-c d c" . org-download-clipboard)
-          ("C-c d e" . org-download-edit)
-          ("C-c d i" . org-download-image)
-          ("C-c d s" . org-download-screenshot)
-          ("C-c d y" . org-download-yank)
+          :prefix-map org-download-map
+          :prefix "C-c d"
+          ("c" . org-download-clipboard)
+          ("e" . org-download-edit)
+          ("i" . org-download-image)
+          ("s" . org-download-screenshot)
+          ("y" . org-download-yank)
           )
     :hook (org-mode . org-download-enable)
     )
@@ -1951,9 +1997,6 @@ Roam builds a note database by inserting a unique ID to your org notes.
   (use-package emacsql :ensure t)
   (use-package org-roam
     :ensure t
-    :preface
-    (defvar org-roam-cmd-map (make-sparse-keymap)
-      "A keymap for org-roam related commands.")
     :defines org-roam-cmd-map
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
@@ -1965,6 +2008,9 @@ Roam builds a note database by inserting a unique ID to your org notes.
     (org-roam-node-display-template
      (concat "${title} " (propertize "${tags:30}" 'face 'org-tag)))
     :init
+    (defvar org-roam-cmd-map (make-sparse-keymap)
+      "A keymap for org-roam related commands.")
+
     (defun org-roam-consult-grep ()
       "Grep in org-roam-directory with `consult-grep'."
       (interactive)
@@ -2003,7 +2049,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :bind
     (:map org-roam-cmd-map
           ("u" . org-roam-ui-open)
-          ("z" . org-roam-ui-zoom)
+          ("z" . org-roam-ui-node-zoom)
           )
     )
 
@@ -2054,8 +2100,7 @@ These applications are actually desktop-level, BTW I use Emacs.
                gt-taker
                gt-translator
                gt-plz-http-client)
-    :functions (my:gt-do-translate-quickly)
-    :preface
+    :init
     (defun my:gt-do-translate-quickly ()
       "Do a quick translate query with minibuffer prompt."
       (interactive)
@@ -2121,10 +2166,14 @@ These applications are actually desktop-level, BTW I use Emacs.
     (pdf-tools-install)
     )
 
+  (use-package nov
+    :ensure t
+    :mode ("\\.epub\\'" . nov-mode)
+    )
+
   ;; not configured yet
   (use-package djvu :ensure t)
   (use-package doc-toc :ensure t)
-  (use-package nov :ensure t)
 #+end_src
 
 ** developer tools
@@ -2141,6 +2190,7 @@ My own packages, you can get them from github with ~el-get~.
 #+begin_src emacs-lisp
   (use-package my-misc
     :el-get gynamics/my-misc.el
+    :demand t
     :bind
     ("M-Q"   . my:unfill-paragraph)
     ("C-x %" . my:eval-and-replace)
