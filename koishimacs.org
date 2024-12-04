@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.1.0
+  ;; Version: 5.2.0
   ;; Package-Requires:
 
   ;;; Commentary:
@@ -202,7 +202,7 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
       (interactive "DPath of parent directory: ")
       (dolist (file (file-name-all-completions "" dir))
         (when (and (directory-name-p file)
-                   (not (member file '("./" "../"))))
+                   (not (member file '("./" "../" ".git/" "archives/" "gnupg/"))))
           (async-byte-recompile-directory
            (concat (file-name-as-directory dir) file)))))
     )
@@ -265,21 +265,6 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
     (marginalia-mode . nerd-icons-completion-marginalia-setup)
     )
 
-  (use-package nerd-icons-dired
-    :ensure t
-    :when my/load-gui-config-p
-    :config
-    ;; do not let it break `wdried-mode`
-    (advice-add
-     #'wdired-change-to-wdired-mode
-     :before (lambda () (nerd-icons-dired-mode -1)))
-    (advice-add
-     #'wdired-change-to-dired-mode
-     :after (lambda () (nerd-icons-dired-mode +1)))
-    :hook
-    (dired-mode . nerd-icons-dired-mode)
-    )
-
   (use-package nerd-icons-ibuffer
     :ensure t
     :when my/load-gui-config-p
@@ -297,16 +282,12 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
 The theme package of doomacs is good.
 
 #+begin_src emacs-lisp
-  ;; Temporary Fix: currently this is missed in doom's dependency
-  (use-package all-the-icons :ensure t)
-
   (use-package doom-themes
     :ensure t
     :when my/load-gui-config-p
     :custom
     (doom-themes-enable-bold t)
     (doom-themes-enable-italic t)
-    (doom-themes-treemacs-theme "doom-colors")
     :hook
     ;; load it earilier to have a smooth startup
     (after-init
@@ -364,9 +345,20 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
   (use-package orderless
     :ensure t
     :demand t
+    :config
+    (orderless-define-completion-style orderless+initialism
+      (orderless-matching-styles '(orderless-initialism orderless-literal orderless-regexp)))
+
+    (setq completion-category-overrides
+          '((file (styles partial-completion orderless+initialism))
+            (buffer (styles orderless+initialism))
+            (consult-multi (styles orderless+initialism))
+            (command (styles orderless+initialism))
+            (variable (styles orderless+initialism))
+            (symbol (styles orderless+initialism))))
     :custom
-    (completion-styles '(orderless basic))
-    (completion-category-overrides '((file (styles basic partial-completion))))
+    (completion-styles '(orderless))
+    (orderless-matching-styles '(orderless-literal orderless-regexp))
     )
 
   (use-package vertico
@@ -445,6 +437,9 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     (setq xref-show-xrefs-function #'consult-xref
           xref-show-definitions-function #'consult-xref)
 
+    ;; Avoid fontify lagging problem [[https://github.com/minad/consult/issues/329]]
+    (setq consult-fontify-max-size 1024)
+
     :config
     ;; Optionally configure preview. The default value
     ;; is 'any, such that any key triggers the preview.
@@ -471,6 +466,15 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     (consult-customize
      consult-line-thing-at-point
      :initial (thing-at-point 'symbol))
+
+    ;; Use `consult-completion-in-region' if Vertico is enabled.
+    ;; Otherwise use the default `completion--in-region' function.
+    (setq completion-in-region-function
+          (lambda (&rest args)
+            (apply (if vertico-mode
+                       #'consult-completion-in-region
+                     #'completion--in-region)
+                   args)))
 
     :bind (;; C-c bindings in `mode-specific-map'
            ("C-c M-x" . consult-mode-command)
@@ -584,19 +588,31 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
                popwin:close-popup-window
                )
     :init
+    (defmacro my:popwin:create (name body)
+      `(let ((buf-name ,name))
+         (unless (buffer-live-p buf-name)
+           ,body
+           (switch-to-prev-buffer))
+         (popwin:popup-buffer
+          (popwin:get-buffer buf-name :create))))
+
+    (defmacro my:popwin:toggle (name creator)
+      `(if (get-buffer-window ,name (selected-frame))
+           (popwin:close-popup-window)
+         (progn
+           ,creator
+           (popwin:stick-popup-window))))
+
     (defun my:popwin:scratch ()
       "Show *scratch* in a popwin, if not exist, create it."
       (interactive)
       (popwin:popup-buffer (get-scratch-buffer-create)))
 
-    (defun my:popwin:scratch-toggle (&optional arg)
+    (defun my:popwin:scratch-toggle ()
       "Toggle *scratch* buffer as a popwin."
-      (interactive "P")
-      (if (get-buffer-window "*scratch*" (selected-frame))
-          (popwin:close-popup-window)
-        (progn
-          (my:popwin:scratch)
-          (popwin:stick-popup-window))))
+      (interactive)
+      (my:popwin:toggle "*scratch*"
+                        (my:popwin:scratch)))
 
     ;; enable popwin mode
     (popwin-mode)
@@ -604,12 +620,13 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     :config
     ;; special display config
     (push '("*Macroexpansion*" :noselect t) popwin:special-display-config)
+    (push '("*Pp Macroexpansion Output*" :noselect t) popwin:special-display-config)
     (push "*Pp Eval Output*" popwin:special-display-config)
 
     :bind-keymap
     ("C-z" . popwin:keymap)
     :bind
-    (("C-`" . my:popwin:scratch-toggle)
+    (("C-`" . my:popwin:vterm-toggle)
      :map popwin:keymap
      ("C-z" . suspend-emacs)
      ("b" . my:popwin:ibuffer)
@@ -625,18 +642,22 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     :init
     (setq eshell-buffer-name "*eshell*")
 
+    (defun my:eshell--buffer-name (&optional arg)
+      (cond ((numberp arg)
+             (format "%s<%d>" eshell-buffer-name arg))
+            (t
+             eshell-buffer-name)))
+
     (defun my:popwin:eshell (&optional arg)
       "Run eshell in a popwin. ARG is passed to eshell."
       (interactive "P")
-      (let ((eshell-buf (cond ((numberp arg)
-                               (format "%s<%d>" eshell-buffer-name arg))
-                              (t
-                               eshell-buffer-name))))
-        (unless (buffer-live-p eshell-buf)
-          (eshell arg) ;create eshell buffer
-          (switch-to-prev-buffer))
-        (popwin:popup-buffer
-         (popwin:get-buffer eshell-buf :create))))
+      (my:popwin:create (my:eshell--buffer-name arg)
+                        (eshell arg)))
+
+    (defun my:popwin:eshell-toggle (&optional arg)
+      (interactive "P")
+      (my:popwin:toggle (my:eshell--buffer-name arg)
+                        (eshell--buffer-name arg)))
     )
 
   (use-package vterm
@@ -647,20 +668,25 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     :init
     (setq vterm-buffer-name "*vterm*")
 
+    (defun my:vterm--buffer-name (&optional arg)
+      (cond ((numberp arg)
+             (format "%s<%d>" vterm-buffer-name arg))
+            ((stringp arg)
+             arg)
+            (t
+             vterm-buffer-name)))
+
     (defun my:popwin:vterm (&optional arg)
       "Run vterm in a popwin. ARG is passed to vterm."
       (interactive "P")
-      (let ((vterm-buf (cond ((numberp arg)
-                              (format "%s<%d>" vterm-buffer-name arg))
-                             ((stringp arg)
-                              arg)
-                             (t
-                              vterm-buffer-name))))
-        (unless (buffer-live-p vterm-buf)
-          (vterm arg) ;create vterm buffer
-          (switch-to-prev-buffer))
-        (popwin:popup-buffer
-         (popwin:get-buffer vterm-buf :create))))
+      (my:popwin:create (my:vterm--buffer-name arg)
+                        (vterm arg)))
+
+    (defun my:popwin:vterm-toggle (&optional arg)
+      "Toggle vterm buffer as a popwin."
+      (interactive "P")
+      (my:popwin:toggle (my:vterm--buffer-name arg)
+                        (my:popwin:vterm arg)))
     )
 
   (use-package ibuffer
@@ -688,43 +714,35 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
  #+end_src
 
 ** dired
-Dired is powerful but incomplete.
+Dired is powerful but rough, dirvish polished it.
 
 #+begin_src emacs-lisp
-  (use-package dired-git-info
-    :ensure t
-    :commands (dired-git-info-mode)
+  (use-package dired
+    :custom
+    (dired-omit-files "\\`[.].*")
+    :bind
+    (:map dired-mode-map
+          ("." . dired-omit-mode)
+          ("C-c w" . wdired-change-to-wdired-mode)
+          )
     )
 
   (use-package dirvish
     :ensure t
-    :autoload (dirvish-override-dired-mode)
+    :init
+    (dirvish-override-dired-mode)
+    :custom
+    (dirvish-attributes
+      '(vc-state subtree-state nerd-icons git-msg file-time file-size))
     :bind
     (:map dirvish-mode-map
           ;; <tab> always translates to TAB by default
           ("TAB" . dirvish-subtree-toggle)
           ;; but C-<tab> won't translate to C-TAB
           ("C-<tab>" . dirvish-layout-toggle)
-          ("<"     . dirvish-history-last)
-          (">"     . dirvish-history-jump)
-          )
-    )
-
-  (use-package wdired
-    :commands (wdired-change-to-wdired-mode
-               wdired-change-to-dired-mode)
-    )
-
-  (use-package dired
-    :init
-    (dirvish-override-dired-mode)
-    :custom
-    (dired-omit-files "\\`[.].*")
-    :bind
-    (:map dired-mode-map
-          ("." . dired-omit-mode)
-          (")" . dired-git-info-mode)
-          ("C-c w" . wdired-change-to-wdired-mode)
+          ("<" . dirvish-history-last)
+          (">" . dirvish-history-jump)
+          ("/" . dirvish-fd)
           )
     )
 #+end_src
@@ -922,10 +940,13 @@ to the emacsclient. Just assume that clients are all graphic frames.
 
   (defvar arrow-keys-map (make-sparse-keymap)
     "Keymap for arrow keys")
-  (define-key arrow-keys-map "A" [up])
-  (define-key arrow-keys-map "B" [down])
-  (define-key arrow-keys-map "C" [right])
-  (define-key arrow-keys-map "D" [left])
+
+  (bind-keys
+   :map arrow-keys-map
+   ("A" [up])
+   ("B" [down])
+   ("C" [right])
+   ("D" [left]))
   ;; arrow keys may be broken in some terminals,
   ;; define a wrapper to translate ESC [ or ESC O
   (define-key esc-map "[" arrow-keys-map)
@@ -1049,8 +1070,8 @@ More previews and visual feedback.
     :after yasnippet
     :bind
     (:map yas-minor-mode-map
-          :prefix-map aya-map
-          :prefix "C-:"
+          :prefix-map aya-command-map
+          :prefix "C-S-y"
           ("w" . aya-create)
           ("TAB" . aya-expand)
           ("SPC" . aya-expand-from-history)
@@ -1196,36 +1217,65 @@ Although there are many other code completion frontends today, company is still 
 #+begin_src emacs-lisp
   (use-package company
     :ensure t
-    :diminish (company-mode . "  ")
     :defines (company-mode-map
+              company-active-map
+              company-prefix-map
               company-backends
               )
+    :config
+    ;; currently there is some problems with loading company-capf
+    (require 'company-capf)
     :custom
-    (company-show-numbers t)
+    (company-lighter-base "  ")
     (company-dabbrev-downcase nil)
+    (company-files-exclusions '(".git/"))
+    (company-format-margin-function 'company-text-icons-margin)
+    (company-text-icons-add-background t)
+    (company-idle-delay 0)
+    (company-selection-wrap-around t)
+    (company-show-numbers t)
+    (company-tooltip-align-annotations t)
     :bind
     (:map company-mode-map
-          ("C-c o" . company-other-backend)
+          ("C-<tab>" . company-other-backend)
+          :prefix-map company-prefix-map
+          :prefix "C-:"
+          ("a" . company-abbrev)
+          ("c" . company-capf)
+          ("d" . company-dabbrev)
+          ("f" . company-files)
+          ("y" . company-yasnippet)
+          ("TAB" . company-begin-backend)
           )
     :hook (prog-mode . company-mode)
     )
 
-  (use-package company-box
+  (use-package company-quickhelp
     :ensure t
-    :diminish (company-box-mode . "")
-    :hook (company-mode . company-box-mode)
+    :hook (company-mode . company-quickhelp-mode)
+    )
+
+  (use-package company-quickhelp-terminal
+    :ensure t
+    :unless my/load-gui-config-p
+    :config (setq company-quickhelp-use-propertized-text nil)
+    :hook (company-quickhelp-mode . company-quickhelp-terminal-mode)
     )
 
   (use-package company-tabnine
     :ensure t
     :custom
     (company-tabnine-binaries-folder (concat user-emacs-directory "tabnine"))
-    :hook (company-mode
-           . (lambda () (add-to-list 'company-backends #'company-tabnine)))
+    :hook
+    (company-mode
+     . (lambda ()
+         (add-to-list 'company-backends
+                      '(company-capf company-yasnippet :with company-tabnine))))
     )
 
   (use-package company-coq
     :ensure t
+    :diminish (company-coq-mode . "  [coq]")
     :hook (coq-mode . company-coq-mode)
     )
 
@@ -1355,7 +1405,13 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
   (use-package flycheck
     :ensure t
     :diminish (flycheck-mode . "  ")
-    :hook (prog-mode . flycheck-mode)
+    :hook
+    (prog-mode . flycheck-mode)
+    (emacs-lisp-mode
+     . (lambda ()
+         (when (member (buffer-name)
+                       '("*Pp Eval Output*" "*Pp Macroexpand Output*"))
+           (flycheck-mode -1))))
     )
 
   (use-package flycheck-aspell :ensure t)
@@ -1395,6 +1451,10 @@ We get two nice UI: box and overlay. Box is more flexible while overlay is coole
 #+begin_src emacs-lisp
   (use-package eldoc
     :diminish (eldoc-mode . " 󱀢")
+    :init
+    (defun my:popwin:eldoc ()
+      (interactive)
+      (popwin:popup-buffer (eldoc-doc-buffer)))
     )
 
   (use-package eldoc-box
@@ -1432,21 +1492,19 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
     (semantic-idle-truncate-long-summaries nil)
     :config
     (require 'semantic/bovine/gcc)
-    (defun my:semantic-enable-minor-modes ()
-      (global-semanticdb-minor-mode 1)
-      (semantic-idle-summary-mode 1)
-      (semantic-stickyfunc-mode 1)
-      (semantic-decoration-mode 1))
+    (global-semanticdb-minor-mode 1)
+    (global-semantic-idle-summary-mode 1)
+    (global-semantic-stickyfunc-mode 1)
+    (global-semantic-decoration-mode 1)
     :bind
     (:map semantic-mode-map
           ("C-c , d" . semantic-ia-show-doc)
           ("C-c , v" . semantic-ia-show-variants)
-          ("C-c , s" . semantic-ia-show-summery)
+          ("C-c , s" . semantic-ia-show-summary)
           ("C-," . semantic-ia-fast-jump)
           ("<C-down-mouse-1>" . semantic-ia-fast-mouse-jump)
           )
-    :hook ((c-mode c++-mode)
-           . (lambda () (semantic-mode) (my:semantic-enable-minor-modes)))
+    :hook ((c-mode c++-mode) . semantic-mode)
     )
 #+end_src
 
@@ -1460,7 +1518,7 @@ we will use ~lsp-ui~ as our default UI in ~prog-mode~.
 #+begin_src emacs-lisp
   (use-package lsp-mode
     :ensure t
-    :defines lsp-mode-map
+    :defines lsp-command-map
     :custom
     (lsp-keymap-prefix "C-S-l")
     )
@@ -1471,9 +1529,9 @@ we will use ~lsp-ui~ as our default UI in ~prog-mode~.
   (use-package lsp-ui
     :ensure t
     :bind
-    (:map lsp-mode-map
-          ("C-S-l d" . lsp-ui-doc-toggle)
-          ("C-S-l i" . lsp-ui-imenu)
+    (:map lsp-command-map
+          ("d" . lsp-ui-doc-toggle)
+          ("i" . lsp-ui-imenu)
           )
     :hook (prog-mode . lsp-ui-mode)
     )
@@ -1587,8 +1645,8 @@ Manage and navigate projects easily.
   (use-package projection
     :ensure t
     :after project
-    :hook
-    (after-init . global-projection-hook-mode)
+    :init
+    (global-projection-hook-mode)
     :bind-keymap
     ("C-x P" . projection-map)
     )
@@ -1630,21 +1688,26 @@ Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++
      . (lambda () ;; one-key C file compilation
          (unless (or (null (buffer-file-name))
                      (file-exists-p "Makefile"))
-           (set (make-local-variable 'compile-command)
+           (let ((file (file-name-nondirectory buffer-file-name)))
+             (set (make-local-variable 'compile-command)
                 ;; emulate make's .c.o implicit pattern rule, but with
                 ;; different defaults for the CC, CPPFLAGS, and CFLAGS
                 ;; variables:
                 ;; $(CC) -c -o $@ $(CPPFLAGS) $(CFLAGS) $<
-                (let ((file (file-name-nondirectory buffer-file-name)))
                   (format "%s -o %s %s %s %s"
                           (or (getenv "CC") "gcc")
                           (file-name-sans-extension file)
                           (or (getenv "CPPFLAGS") "-DDEBUG=9")
                           (or (getenv "CFLAGS") "-Wall -g")
-                          file))))))
+                          file))
+             (set (make-local-variable 'gud-gdb-command-name)
+                  (format "gdb -i=mi %s"
+                          (file-name-sans-extension file)))
+             ))))
     :bind
     (:map c-mode-map
-          ("C-c C-r" . compile))
+          ("C-c C-r" . compile)
+          ("C-c C-d" . gdb))
     )
 #+end_src
 
@@ -1676,7 +1739,7 @@ Most of them are not configured and deferred.
 #+begin_src emacs-lisp
   (use-package haskell-mode
     :ensure t
-    :autoload haskell-hoogle
+    :autoload (haskell-hoogle)
     :bind
     (:map haskell-mode-map
           ("C-c C-s" . haskell-hoogle)
@@ -1865,6 +1928,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      ("C-c c" . org-capture)
      ("C-c l" . org-store-link)
      :map org-mode-map ;; override keybindings
+     ("C-'" . avy-goto-char)
      ("C-S-<left>"  . windower-move-border-left)
      ("C-S-<right>" . windower-move-border-right)
      ("C-S-<up>"    . windower-move-border-above)
@@ -1936,7 +2000,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-download-screenshot-method "spectacle -br -o %s")
     :bind
     (:map org-mode-map
-          :prefix-map org-download-map
+          :prefix-map org-download-cmd-map
           :prefix "C-c d"
           ("c" . org-download-clipboard)
           ("e" . org-download-edit)
@@ -1980,8 +2044,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :ensure t
     :bind
     (:map org-mode-map
-          ("C-c D" . org-drill)
-          )
+          ("C-c D" . org-drill))
     )
 
   ;; play org document as slides
@@ -2260,6 +2323,8 @@ My own packages, you can get them from github with ~el-get~.
   ;;  'backup-directory-alist
   ;;  `(("." . ,(concat user-emacs-directory "~/.emacs/backups")))
 
+  ;; safe deletion
+  (customize-set-variable 'delete-by-moving-to-trash t)
 #+end_src
 
 ** footer
