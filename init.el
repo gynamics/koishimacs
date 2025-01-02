@@ -46,10 +46,11 @@
  '(inhibit-startup-screen t)
  '(native-comp-async-report-warnings-errors nil)
  '(package-quickstart t)
+ '(package-selected-packages
+   '(xref-union all-the-icons company-quickhelp-terminal company-quickhelp lsp-mode treemacs adoc-mode emacsql haskell-ts-mode tree-sitter-langs nov doc-toc djvu pdf-tools go-translate plz emms elfeed org-roam-timestamps org-roam-ui org-roam-ql org-roam htmlize org-tree-slide org-drill citar-embark citar valign org-download org-modern org-edit-indirect org-fragtog org-appear auctex web-mode typescript-mode rust-mode riscv-mode purescript-mode proof-general tuareg plantuml-mode nhexl-mode lua-mode graphviz-dot-mode go-mode gnuplot geiser-guile geiser-chez disaster bison-mode yaml-pro auto-rename-tag slime-repl-ansi-color pyvenv dap-mode spdx lice magit projection-multi projection projectile format-all lsp-haskell ccls gtags-mode helpful eldoc-box flycheck-pkg-config flycheck-haskell flycheck-guile flycheck-aspell rainbow-mode highlight-doxygen highlight-escape-sequences highlight-parentheses hl-indent-scope hl-block-mode fancy-compilation dimmer diff-hl color-identifiers-mode company-web slime-company company-shell company-maxima company-coq company-tabnine company-box crdt pyim separedit iedit multiple-cursors smartparens edit-at-point auto-yasnippet yasnippet-snippets vlf visual-fill-column vundo visual-regexp goto-line-preview goto-char-preview windower ace-link dashboard power-mode minimap centaur-tabs dirvish dired-git-info register-list vterm popwin embark-consult embark consult-lsp consult-flycheck consult marginalia vertico orderless keycast hide-mode-line doom-modeline doom-themes nerd-icons-ibuffer nerd-icons-dired nerd-icons-completion yasnippet lsp-ui flycheck company el-get async diminish))
  '(scroll-bar-mode nil)
  '(size-indication-mode t)
  '(tab-always-indent t)
- '(tab-width 2)
  '(tool-bar-mode nil)
  '(undo-limit (expt 2 20)))
 
