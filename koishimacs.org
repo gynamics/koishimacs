@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2024-07-21 Sun>
+#+date: <2025-01-01 Wed>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.2.0
+  ;; Version: 5.3.0
   ;; Package-Requires:
 
   ;;; Commentary:
@@ -368,14 +368,20 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
      (vertico-multiform-mode . " 󰛡"))
     :init
     (vertico-mode)
-    (setq vertico-cycle t)
+    (setq vertico-multiform-commands
+          '((consult-imenu buffer indexed)
+            (consult-flycheck buffer indexed)
+            (consult-yank-pop indexed)
+            ))
     (setq vertico-multiform-categories
           '((embark-keybinding grid)
-            (consult-grep buffer)))
+            (consult-grep buffer)
+            (org-roam-node buffer indexed)
+            ))
     (vertico-multiform-mode)
     :bind
     (:map vertico-map
-          ("?" . embark-keybindings)
+          ("?" . embark-bindings)
           ("TAB" . minibuffer-complete) ;; orig: vertico-insert
           ("C-<tab>" . vertico-insert)
           )
@@ -577,7 +583,7 @@ all such buffers, e. g. vterm, ibuffer, message, etc.
 ~popwin~ provides more agile workflows based on popup buffers.
 Related packages that provides auxiliary functions must be placed before it.
 
-Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we won't add ~occur-mode~ to ~popwin:special-display-config~~
+Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we won't add ~occur-mode~ to ~popwin:special-display-config~ .
 
 #+begin_src emacs-lisp
   (use-package popwin
@@ -735,7 +741,8 @@ Dired is powerful but rough, dirvish polished it.
     (dirvish-attributes
       '(vc-state subtree-state nerd-icons git-msg file-time file-size))
     :bind
-    (:map dirvish-mode-map
+    (("C-S-e" . dirvish-side)
+     :map dirvish-mode-map
           ;; <tab> always translates to TAB by default
           ("TAB" . dirvish-subtree-toggle)
           ;; but C-<tab> won't translate to C-TAB
@@ -825,6 +832,9 @@ A big but useless thing.
        )
      )
     (dashboard-image-banner-max-height 400)
+    (dashboard-init-info
+     (lambda () (format "GNU Emacs %s started in %s"
+                    emacs-version (emacs-init-time))))
     (dashboard-startupify-list
      '(dashboard-insert-banner
        dashboard-insert-newline
@@ -1055,7 +1065,7 @@ More previews and visual feedback.
 
 #+begin_src emacs-lisp
   (use-package yasnippet
-    :diminish (yas-minor-mode . "  ")
+    :diminish (yas-minor-mode . " 󰰳")
     :hook ((org-mode prog-mode) . yas-minor-mode)
     :defines yas-minor-mode-map
     )
@@ -1123,7 +1133,7 @@ Less is more.
 
   (use-package smartparens
     :ensure t
-    :diminish (smartparens-mode . " 󰅲")
+    :diminish (smartparens-mode . " 󱃗")
     :init
     (require 'smartparens-config)
     :bind
@@ -1212,7 +1222,9 @@ Not classified yet.
 
 * Emacs IDE
 ** completion at point
-Although there are many other code completion frontends today, company is still the most stable one.
+Although there are many other code completion frontends today, ~company~ is still the most stable one.
+
+By default ~company~ uses overlay for display completion options, which has a series of problems. These is a package ~company-box~ which uses child frames, but has some performance problems with documentation display. So, as a tradeoff, currently I don't use child frames and just stay with overlays.
 
 #+begin_src emacs-lisp
   (use-package company
@@ -1222,11 +1234,19 @@ Although there are many other code completion frontends today, company is still 
               company-prefix-map
               company-backends
               )
+    :init
+    (defun my:add-grouped-company-backend (backends)
+      (add-to-list 'company-backends
+                   (append backends
+                           '(:with company-yasnippet company-dabbrev-code))))
     :config
     ;; currently there is some problems with loading company-capf
     (require 'company-capf)
     :custom
-    (company-lighter-base "  ")
+    (company-lighter-base "󰐱")
+    (company-transformers '(delete-consecutive-dups
+                            company-sort-by-backend-importance
+                            company-sort-prefer-same-case-prefix))
     (company-dabbrev-downcase nil)
     (company-files-exclusions '(".git/"))
     (company-format-margin-function 'company-text-icons-margin)
@@ -1247,7 +1267,12 @@ Although there are many other code completion frontends today, company is still 
           ("y" . company-yasnippet)
           ("TAB" . company-begin-backend)
           )
-    :hook (prog-mode . company-mode)
+    :hook
+    (prog-mode . company-mode)
+    (emacs-lisp-mode
+     . (lambda () (my:add-grouped-company-backend '(company-capf))))
+    ((c-mode c++-mode)
+     . (lambda () (my:add-grouped-company-backend '(company-clang company-semantic))))
     )
 
   (use-package company-quickhelp
@@ -1258,56 +1283,50 @@ Although there are many other code completion frontends today, company is still 
   (use-package company-quickhelp-terminal
     :ensure t
     :unless my/load-gui-config-p
-    :config (setq company-quickhelp-use-propertized-text nil)
+    :config
+    (setq company-quickhelp-use-propertized-text nil)
     :hook (company-quickhelp-mode . company-quickhelp-terminal-mode)
-    )
-
-  (use-package company-tabnine
-    :ensure t
-    :custom
-    (company-tabnine-binaries-folder (concat user-emacs-directory "tabnine"))
-    :hook
-    (company-mode
-     . (lambda ()
-         (add-to-list 'company-backends
-                      '(company-capf company-yasnippet :with company-tabnine))))
     )
 
   (use-package company-coq
     :ensure t
-    :diminish (company-coq-mode . "  [coq]")
+    :diminish (company-coq-mode . " 󰐱[coq]")
     :hook (coq-mode . company-coq-mode)
     )
 
   (use-package company-maxima
     :ensure t
-    :hook ((maxima-mode maxima-inferior-mode)
-           . (lambda ()
-               (require 'company-maxima)
-               (add-to-list 'company-backends
-                            '(company-maxima-symbols company-maxima-libraries))))
+    :hook
+    ((maxima-mode maxima-inferior-mode)
+     . (lambda ()
+         (require 'company-maxima)
+         (my:add-grouped-company-backend
+          '(company-maxima-symbols company-maxima-libraries))))
     )
 
   (use-package company-shell
     :ensure t
-    :hook (shell-script-mode
-           . (lambda ()
-               (add-to-list 'company-backends
-                            '(company-shell company-shell-env))))
+    :hook
+    (shell-script-mode
+     . (lambda ()
+         (my:add-grouped-company-backend
+          '(company-shell company-shell-env))))
     )
 
   (use-package slime-company
     :ensure t
-    :hook (slime-mode
-           . (lambda () (slime-setup '(slime-company))))
+    :hook
+    (slime-mode
+     . (lambda () (slime-setup '(slime-fancy slime-company))))
     )
 
   (use-package company-web
     :ensure t
-    :hook (web-mode
-           . (lambda ()
-               (add-to-list 'company-backends
-                            '(company-web-html company-files))))
+    :hook
+    (web-mode
+     . (lambda ()
+         (my:add-grouped-company-backend
+          '(company-web-html company-files))))
     )
 #+end_src
 
@@ -1348,12 +1367,6 @@ They are FANTASTIC!!!
     (fancy-compilation-mode)
     )
 
-  (use-package hl-block-mode
-    :ensure t
-    :when my/load-gui-config-p
-    :hook (prog-mode . hl-block-mode)
-    )
-
   (use-package hl-indent-scope
     :ensure t
     :when my/load-gui-config-p
@@ -1365,7 +1378,7 @@ They are FANTASTIC!!!
 
   (use-package highlight-parentheses
     :ensure t
-    :diminish highlight-parentheses-mode
+    :diminish (highlight-parentheses-mode . " 󰵪")
     :custom (highlight-parentheses-colors
              '("cyan" "yellow" "magenta" "red" "green" "blue"))
     :hook (prog-mode . highlight-parentheses-mode)
@@ -1441,6 +1454,12 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 
   (use-package flymake
     :diminish (flymake-mode . " 󰮄")
+    :bind
+    (:map flymake-mode-map
+          ("C-x ! d" . flymake-show-buffer-diagnostics)
+          ("C-x ! D" . flymake-show-project-diagnostics)
+          ("C-x ! p" . flymake-goto-prev-error)
+          ("C-x ! n" . flymake-goto-next-error))
     )
 
 #+end_src
@@ -1450,7 +1469,7 @@ We get two nice UI: box and overlay. Box is more flexible while overlay is coole
 
 #+begin_src emacs-lisp
   (use-package eldoc
-    :diminish (eldoc-mode . " 󱀢")
+    :diminish (eldoc-mode . " 󰙎")
     :init
     (defun my:popwin:eldoc ()
       (interactive)
@@ -1509,13 +1528,27 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
 #+end_src
 
 Emacs has introduced built-in Language Server Protocol (LSP) support
-since emacs29, with ~eglot~ package. But ~lsp~ does more.
+since emacs29, with ~eglot~ package. This package has no extra
+dependencies, and provides out-of-box lsp client service.
 
-Actually there is already a ~sideline~ package, but sideline is enabled
+~lsp-mode~ is a more sophisticated package which provides more
+features. One nice feature I like is ~lsp-ui-sideline~.  Actually there
+is already an independent package ~sideline-lsp~ but sideline is enabled
 automatically with ~lsp-ui~, and that UI works without lsp connected. So
 we will use ~lsp-ui~ as our default UI in ~prog-mode~.
 
 #+begin_src emacs-lisp
+  (use-package eglot
+    :bind
+    (:map eglot-mode-map
+          :prefix-map eglot-command-map
+          :prefix "C-S-l"
+          ("a" . eglot-code-actions)
+          ("d" . eldoc)
+          ("=" . eglot-format)
+          ("r" . eglot-rename))
+    )
+
   (use-package lsp-mode
     :ensure t
     :defines lsp-command-map
@@ -1778,11 +1811,15 @@ Most of them are not configured and deferred.
 
   (use-package slime
     :ensure t
-    :diminish " Ϛむ"
+    :diminish
+    (slime-mode . " Ϛむ")
+    :custom
+    (slime-autodoc-mode-string " Ϛi")
     )
 
   (use-package slime-repl-ansi-color
     :ensure t
+    :diminish (slime-repl-ansi-color-mode . " Ϛ")
     :hook slime-repl-mode
     )
 

@@ -49,7 +49,6 @@
  '(scroll-bar-mode nil)
  '(size-indication-mode t)
  '(tab-always-indent t)
- '(tab-width 2)
  '(tool-bar-mode nil)
  '(undo-limit (expt 2 20)))
 
