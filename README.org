@@ -4,12 +4,20 @@
 
 Prepare to lose your mind in Emacs!
 
-[[https://exiled-images.pages.dev/file/be1f2792cbe4bbcbf9147.png]]
-
 * About
 My personal Emacs configuration.
 
 Read [[file:koishimacs.org::*preface][koishimacs.org:Prelude:preface]] if you are interested in my ideas.
+
+* Screenshots
+
+GUI dashboard
+
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMGZ4fNu_3PydCHqYmyVqXHTN70XCgAAtDBMRvMAUBU0HqKeU4-POUBAAMCAAN3AAM2BA.png]]
+
+TUI
+
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMHZ4fNySjANoZf1-nEGd2QuffpSZAAAtHBMRvMAUBUMBwueyZd_GsBAAMCAAN5AAM2BA.png]]
 
 * Features
 - A sweet logo (handdrawn, original character by /Team Shanghai Alice/)
