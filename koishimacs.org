@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2024-07-21 Sun>
+#+date: <2025-01-01 Wed>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.2.0
+  ;; Version: 5.3.0
   ;; Package-Requires:
 
   ;;; Commentary:
@@ -57,44 +57,56 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
     "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
     (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
       (dolist (path additional-path-list)
-        (let ((path-string (eval path)))
-          (unless (member path-string env-path-list)
-            (push path-string env-path-list))))
+        (add-to-list 'exec-path path-string))
       (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
 
   (defun my:add-to-exec-path (additional-path-list)
     "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
     (dolist (path additional-path-list)
-      (let ((path-string (eval path)))
-        (unless (member path-string exec-path)
-          (add-to-list 'exec-path path-string)))))
+      (add-to-list 'exec-path path-string)))
+
+  (defun my:add-to-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to both $PATH and EXEC-PATH."
+    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
+      (dolist (path additional-path-list)
+        (add-to-list 'exec-path path)
+        (add-to-list 'env-path-list path))
+      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
+
+  (defun my:non-nil-list (&rest args)
+    "Construct a non-nil list with ARGS, remove nils in ARGS."
+    (if (null args)
+        nil
+      (let ((head (car args))
+            (tail (apply #'my:non-nil-list (cdr args))))
+        (if (null head) tail (cons head tail)))))
 
   (let ((home (file-name-as-directory (getenv "HOME"))))
-    ;; set PATH as well as exec-path
-    (mapc
-     (lambda (f)
-       (funcall
-        f
-        (list  ;; extend the value of EXEC-PATH and $PATH here
-         ;; for haskell
-         (concat home ".ghcup/bin")
-         (concat home ".cabal/bin")
-         ;; for rust
-         (concat home ".cargo/bin")
-         ;; for ruby
-         (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\"")
-         )))
-     '(my:add-to-env-path
-       my:add-to-exec-path
-       ))
-    ;; set go workspace
-    (setenv "GOPATH" (concat home ".go"))
-    )
-
-  ;; proxy (if you have one)
-  (setenv "http_proxy" "http://127.0.0.1:2080")
-  (setenv "https_proxy" "http://127.0.0.1:2080")
-  (setenv "ALL_PROXY" "socks5://127.0.0.1:2080")
+    ;; for some local tools, this should be added to PATH earlier
+    (my:add-to-path (list (concat home ".local/bin")))
+    (let ((additional-path-list
+           (my:non-nil-list  ;; extend the value of EXEC-PATH and $PATH here
+            ;; for haskell
+            (concat home ".ghcup/bin")
+            (concat home ".cabal/bin")
+            ;; for rust
+            (concat home ".cargo/bin")
+            ;; for ruby
+            (when (executable-find "gem")
+              (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
+          (additional-env-list
+           (my:non-nil-list
+            ;; for go
+            `("GOPATH" ,(concat home ".go"))
+            ;; proxy (if you have one)
+            '("http_proxy" "http://127.0.0.1:2080")
+            '("https_proxy" "http://127.0.0.1:2080")
+            '("ALL_PROXY" "socks5://127.0.0.1:2080"))))
+      ;; add additional paths to PATH as well as exec-path
+      (my:add-to-path additional-path-list)
+      ;; set additional environment variables
+      (mapc (lambda (kv) (apply #'setenv kv)) additional-env-list)
+      ))
 
 #+end_src
 
@@ -197,8 +209,8 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
     :custom
     (async-bytecomp-package-p t)
     :init
-    (defun my:byte-compile-subdirectories (dir)
-      "Byte compile all subdirectories under DIR."
+    (defun my:byte-compile-subdirs-async (dir)
+      "Byte compile all subdirectories under DIR asynchronously."
       (interactive "DPath of parent directory: ")
       (dolist (file (file-name-all-completions "" dir))
         (when (and (directory-name-p file)
@@ -275,7 +287,6 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
   (use-package abbrev :diminish (abbrev-mode . "  "))
   (use-package autorevert :diminish (auto-revert-mode . "  "))
   (use-package whitespace :diminish (whitespace-mode . "  "))
-  (use-package org-capture :diminish (org-capture-mode . " 󰄀"))
 #+end_src
 
 ** color theme
@@ -366,18 +377,30 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :diminish
     ((vertico-mode . " 󰄄")
      (vertico-multiform-mode . " 󰛡"))
+    :custom
+    (vertico-scroll-margin 0) ;; Different scroll margin
+    (vertico-count 20) ;; Show more candidates
+    (vertico-resize t) ;; Grow and shrink the Vertico minibuffer
+    (vertico-cycle t) ;; Enable cycling for `vertico-next/previous'
     :init
     (vertico-mode)
-    (setq vertico-cycle t)
+    (setq vertico-multiform-commands
+          '((consult-imenu buffer indexed)
+            (consult-flycheck buffer indexed)
+            (consult-yank-pop indexed)
+            ))
     (setq vertico-multiform-categories
           '((embark-keybinding grid)
-            (consult-grep buffer)))
+            (consult-grep buffer)
+            (org-roam-node buffer indexed)
+            ))
     (vertico-multiform-mode)
     :bind
     (:map vertico-map
-          ("?" . embark-keybindings)
+          ("?" . embark-bindings)
           ("TAB" . minibuffer-complete) ;; orig: vertico-insert
           ("C-<tab>" . vertico-insert)
+          ("C-'" . vertico-quick-jump)
           )
     )
 
@@ -577,7 +600,7 @@ all such buffers, e. g. vterm, ibuffer, message, etc.
 ~popwin~ provides more agile workflows based on popup buffers.
 Related packages that provides auxiliary functions must be placed before it.
 
-Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we won't add ~occur-mode~ to ~popwin:special-display-config~~
+Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we won't add ~occur-mode~ to ~popwin:special-display-config~ .
 
 #+begin_src emacs-lisp
   (use-package popwin
@@ -735,7 +758,8 @@ Dired is powerful but rough, dirvish polished it.
     (dirvish-attributes
       '(vc-state subtree-state nerd-icons git-msg file-time file-size))
     :bind
-    (:map dirvish-mode-map
+    (("C-S-e" . dirvish-side)
+     :map dirvish-mode-map
           ;; <tab> always translates to TAB by default
           ("TAB" . dirvish-subtree-toggle)
           ;; but C-<tab> won't translate to C-TAB
@@ -754,6 +778,7 @@ These are my collection, but not that important, or not used.
   ;; an alternative tab bar
   (use-package centaur-tabs
     :ensure t
+    :when my/load-gui-config-p
     :custom
     (centaur-tabs-set-icons t)
     (centaur-tabs-style "wave")
@@ -772,6 +797,7 @@ These are my collection, but not that important, or not used.
   ;; an alternative side bar, like neotree
   (use-package treemacs
     :ensure t
+    :when my/load-gui-config-p
     :custom
     (treemacs-position 'right)
     (treemacs-show-hidden-files nil)
@@ -780,7 +806,10 @@ These are my collection, but not that important, or not used.
     )
 
   ;; a fake mini code scroll map, with bad efficiency
-  (use-package minimap :ensure t)
+  (use-package minimap
+    :ensure t
+    :when my/load-gui-config-p
+    )
 
   ;; just something fun
   (use-package power-mode
@@ -825,6 +854,9 @@ A big but useless thing.
        )
      )
     (dashboard-image-banner-max-height 400)
+    (dashboard-init-info
+     (lambda () (format "GNU Emacs %s started in %s"
+                    emacs-version (emacs-init-time))))
     (dashboard-startupify-list
      '(dashboard-insert-banner
        dashboard-insert-newline
@@ -1055,7 +1087,7 @@ More previews and visual feedback.
 
 #+begin_src emacs-lisp
   (use-package yasnippet
-    :diminish (yas-minor-mode . "  ")
+    :diminish (yas-minor-mode . " 󰰳")
     :hook ((org-mode prog-mode) . yas-minor-mode)
     :defines yas-minor-mode-map
     )
@@ -1123,7 +1155,7 @@ Less is more.
 
   (use-package smartparens
     :ensure t
-    :diminish (smartparens-mode . " 󰅲")
+    :diminish (smartparens-mode . " 󱃗")
     :init
     (require 'smartparens-config)
     :bind
@@ -1212,7 +1244,9 @@ Not classified yet.
 
 * Emacs IDE
 ** completion at point
-Although there are many other code completion frontends today, company is still the most stable one.
+Although there are many other code completion frontends today, ~company~ is still the most stable one.
+
+By default ~company~ uses overlay for display completion options, which has a series of problems. These is a package ~company-box~ which uses child frames, but has some performance problems with documentation display. So, as a tradeoff, currently I don't use child frames and just stay with overlays.
 
 #+begin_src emacs-lisp
   (use-package company
@@ -1222,11 +1256,19 @@ Although there are many other code completion frontends today, company is still 
               company-prefix-map
               company-backends
               )
+    :init
+    (defun my:add-grouped-company-backend (backends)
+      (add-to-list 'company-backends
+                   (append backends
+                           '(:with company-yasnippet company-dabbrev-code))))
     :config
     ;; currently there is some problems with loading company-capf
     (require 'company-capf)
     :custom
-    (company-lighter-base "  ")
+    (company-lighter-base "󰐱")
+    (company-transformers '(delete-consecutive-dups
+                            company-sort-by-backend-importance
+                            company-sort-prefer-same-case-prefix))
     (company-dabbrev-downcase nil)
     (company-files-exclusions '(".git/"))
     (company-format-margin-function 'company-text-icons-margin)
@@ -1247,7 +1289,12 @@ Although there are many other code completion frontends today, company is still 
           ("y" . company-yasnippet)
           ("TAB" . company-begin-backend)
           )
-    :hook (prog-mode . company-mode)
+    :hook
+    (prog-mode . company-mode)
+    (emacs-lisp-mode
+     . (lambda () (my:add-grouped-company-backend '(company-capf))))
+    ((c-mode c++-mode)
+     . (lambda () (my:add-grouped-company-backend '(company-clang company-semantic))))
     )
 
   (use-package company-quickhelp
@@ -1258,56 +1305,50 @@ Although there are many other code completion frontends today, company is still 
   (use-package company-quickhelp-terminal
     :ensure t
     :unless my/load-gui-config-p
-    :config (setq company-quickhelp-use-propertized-text nil)
+    :config
+    (setq company-quickhelp-use-propertized-text nil)
     :hook (company-quickhelp-mode . company-quickhelp-terminal-mode)
-    )
-
-  (use-package company-tabnine
-    :ensure t
-    :custom
-    (company-tabnine-binaries-folder (concat user-emacs-directory "tabnine"))
-    :hook
-    (company-mode
-     . (lambda ()
-         (add-to-list 'company-backends
-                      '(company-capf company-yasnippet :with company-tabnine))))
     )
 
   (use-package company-coq
     :ensure t
-    :diminish (company-coq-mode . "  [coq]")
+    :diminish (company-coq-mode . " 󰐱[coq]")
     :hook (coq-mode . company-coq-mode)
     )
 
   (use-package company-maxima
     :ensure t
-    :hook ((maxima-mode maxima-inferior-mode)
-           . (lambda ()
-               (require 'company-maxima)
-               (add-to-list 'company-backends
-                            '(company-maxima-symbols company-maxima-libraries))))
+    :hook
+    ((maxima-mode maxima-inferior-mode)
+     . (lambda ()
+         (require 'company-maxima)
+         (my:add-grouped-company-backend
+          '(company-maxima-symbols company-maxima-libraries))))
     )
 
   (use-package company-shell
     :ensure t
-    :hook (shell-script-mode
-           . (lambda ()
-               (add-to-list 'company-backends
-                            '(company-shell company-shell-env))))
+    :hook
+    (shell-script-mode
+     . (lambda ()
+         (my:add-grouped-company-backend
+          '(company-shell company-shell-env))))
     )
 
   (use-package slime-company
     :ensure t
-    :hook (slime-mode
-           . (lambda () (slime-setup '(slime-company))))
+    :hook
+    (slime-mode
+     . (lambda () (slime-setup '(slime-fancy slime-company))))
     )
 
   (use-package company-web
     :ensure t
-    :hook (web-mode
-           . (lambda ()
-               (add-to-list 'company-backends
-                            '(company-web-html company-files))))
+    :hook
+    (web-mode
+     . (lambda ()
+         (my:add-grouped-company-backend
+          '(company-web-html company-files))))
     )
 #+end_src
 
@@ -1348,12 +1389,6 @@ They are FANTASTIC!!!
     (fancy-compilation-mode)
     )
 
-  (use-package hl-block-mode
-    :ensure t
-    :when my/load-gui-config-p
-    :hook (prog-mode . hl-block-mode)
-    )
-
   (use-package hl-indent-scope
     :ensure t
     :when my/load-gui-config-p
@@ -1365,7 +1400,7 @@ They are FANTASTIC!!!
 
   (use-package highlight-parentheses
     :ensure t
-    :diminish highlight-parentheses-mode
+    :diminish (highlight-parentheses-mode . " 󰵪")
     :custom (highlight-parentheses-colors
              '("cyan" "yellow" "magenta" "red" "green" "blue"))
     :hook (prog-mode . highlight-parentheses-mode)
@@ -1441,6 +1476,12 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 
   (use-package flymake
     :diminish (flymake-mode . " 󰮄")
+    :bind
+    (:map flymake-mode-map
+          ("C-x ! d" . flymake-show-buffer-diagnostics)
+          ("C-x ! D" . flymake-show-project-diagnostics)
+          ("C-x ! p" . flymake-goto-prev-error)
+          ("C-x ! n" . flymake-goto-next-error))
     )
 
 #+end_src
@@ -1450,7 +1491,7 @@ We get two nice UI: box and overlay. Box is more flexible while overlay is coole
 
 #+begin_src emacs-lisp
   (use-package eldoc
-    :diminish (eldoc-mode . " 󱀢")
+    :diminish (eldoc-mode . " 󰙎")
     :init
     (defun my:popwin:eldoc ()
       (interactive)
@@ -1472,13 +1513,16 @@ We get two nice UI: box and overlay. Box is more flexible while overlay is coole
 #+end_src
 
 ** code browsing
-gnu global is much faster than ctags for emacs.
+Gnu global is much faster than ctags for emacs.
 
 #+begin_src emacs-lisp
   (use-package gtags-mode
     :diminish " 󰓼"
     :ensure t
     )
+
+  ;; xref-union allow us to use multiple xref backends together
+  (use-package xref-union :ensure t)
 #+end_src
 
 ** code analysis
@@ -1509,13 +1553,30 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
 #+end_src
 
 Emacs has introduced built-in Language Server Protocol (LSP) support
-since emacs29, with ~eglot~ package. But ~lsp~ does more.
+since emacs29, with ~eglot~ package. This package has no extra
+dependencies, and provides out-of-box lsp client service.
 
-Actually there is already a ~sideline~ package, but sideline is enabled
+~lsp-mode~ is a more sophisticated package which provides more
+features. One nice feature I like is ~lsp-ui-sideline~.  Actually there
+is already an independent package ~sideline-lsp~ but sideline is enabled
 automatically with ~lsp-ui~, and that UI works without lsp connected. So
 we will use ~lsp-ui~ as our default UI in ~prog-mode~.
 
 #+begin_src emacs-lisp
+  (use-package eglot
+    :config
+    (setf (alist-get 'haskell-mode eglot-server-programs)
+          '(haskell-mode haskell-ts-mode))
+    :bind
+    (:map eglot-mode-map
+          :prefix-map eglot-command-map
+          :prefix "C-S-l"
+          ("a" . eglot-code-actions)
+          ("d" . eldoc)
+          ("=" . eglot-format)
+          ("r" . eglot-rename))
+    )
+
   (use-package lsp-mode
     :ensure t
     :defines lsp-command-map
@@ -1778,11 +1839,15 @@ Most of them are not configured and deferred.
 
   (use-package slime
     :ensure t
-    :diminish " Ϛむ"
+    :diminish
+    (slime-mode . " Ϛむ")
+    :custom
+    (slime-autodoc-mode-string " Ϛi")
     )
 
   (use-package slime-repl-ansi-color
     :ensure t
+    :diminish (slime-repl-ansi-color-mode . " Ϛ")
     :hook slime-repl-mode
     )
 
@@ -1838,6 +1903,12 @@ Most of them are not configured and deferred.
     (geiser-guile-init-file (my:geiser-file-path ".guile-geiser"))
     )
 
+  (use-package plantuml-mode
+    :ensure t
+    :custom
+    (plantuml-default-exec-mode 'executable)
+    )
+
   (use-package adoc-mode :ensure t :mode ("\\.adoc\\'" . adoc-mode))
   (use-package bison-mode :ensure t)
   (use-package disaster :ensure t)
@@ -1847,7 +1918,6 @@ Most of them are not configured and deferred.
   (use-package lua-mode :ensure t)
   (use-package maxima :ensure t)
   (use-package nhexl-mode :ensure t)
-  (use-package plantuml-mode :ensure t)
   (use-package tuareg :ensure t)
   (use-package proof-general :ensure t)
   (use-package purescript-mode :ensure t)
@@ -1875,20 +1945,21 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :custom
     (org-directory (my:weak-directory "/wsp/doc/org"))
     (org-agenda-files (list (my:strong-directory (file-name-concat org-directory "roam/agenda"))))
-    (org-babel-load-languages '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t)))
+    (org-babel-load-languages '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t)))
     (org-export-backends '(ascii html latex man md odt texinfo))
     (org-export-with-sub-superscripts nil)
     (org-fontify-whole-block-delimiter-line t)
     (org-fontify-whole-heading-line t)
-    (org-format-latex-options '(:foreground default :background default :scale 1.0 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
+    (org-format-latex-options '(:foreground default :background "Transparent" :scale 1.0 :html-foreground auto :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
     (org-hide-emphasis-markers t)
     (org-hide-leading-stars t)
     (org-hide-macro-markers t)
     (org-highlight-latex-and-related '(native latex script entities))
     (org-image-actual-width nil)
     (org-latex-compiler "xelatex")
+    (org-preview-latex-default-process 'magick)
     (org-latex-listings 'minted)
-    (org-latex-package-alist '(("" "minted")))
+    (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz")))
     (org-latex-pdf-process
      '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
        "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
@@ -1903,16 +1974,16 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      '(("C" . c)
        ("C++" . c++)
        ("asymptote" . asy)
-       ("bash" . sh)
+       ("bash" . bash-ts)
        ("beamer" . latex)
        ("calc" . fundamental)
        ("cpp" . c++)
        ("ditaa" . ditaa)
        ("dot" . graphviz-dot)
        ("elisp" . emacs-lisp)
-       ("haskell" . haskell)
+       ("haskell" . haskell-ts)
        ("ocaml" . tuareg)
-       ("python" . python)
+       ("python" . python-ts)
        ("scheme" . scheme)
        ("screen" . shell-script)
        ("shell" . sh)
@@ -1922,7 +1993,26 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-startup-with-inline-images my/load-gui-config-p)
     (org-todo-keywords '((sequence "TODO" "DONE" "PEND")))
     (org-use-sub-superscripts nil)
+    :config
+    (add-to-list
+     'org-preview-latex-process-alist
+     '(magick
+       :programs ("latex" "magick")
+       :description "pdf > png"
+       :message "you need to install the programs: latex and imagemagick."
+       :image-input-type "pdf"
+       :image-output-type "png"
+       :image-size-adjust (1.0 . 1.0)
+       :latex-compiler
+       ("pdflatex -interaction nonstopmode -output-directory %o %f")
+       :image-converter
+       ("magick -density %D %f -trim -antialias -quality 100 %O")))
 
+    (defun org-toggle-emphasis-markers ()
+      "Toggle visibility of emphasis markers in current buffer."
+      (interactive)
+      (set-variable 'org-hide-emphasis-markers (not org-hide-emphasis-markers))
+      (org-restart-font-lock))
     :bind
     (("C-c a" . org-agenda)
      ("C-c c" . org-capture)
@@ -1943,9 +2033,14 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     ("C-c v l" . visual-line-mode)
     )
 
+  (use-package org-capture
+    :diminish (org-capture-mode . " 󰄀")
+    )
+
   (use-package org-appear
     :ensure t
     :custom
+    (org-appear-autoemphasis t)
     (org-appear-autoentities t)
     (org-appear-autokeywords t)
     (org-appear-autolinks t)
@@ -2225,8 +2320,8 @@ These applications are actually desktop-level, BTW I use Emacs.
   (use-package pdf-tools
     :ensure t
     :magic ("%PDF" . pdf-view-mode)
-    :config
-    (pdf-tools-install)
+    :init
+    (pdf-loader-install)
     )
 
   (use-package nov
@@ -2253,7 +2348,6 @@ My own packages, you can get them from github with ~el-get~.
 #+begin_src emacs-lisp
   (use-package my-misc
     :el-get gynamics/my-misc.el
-    :demand t
     :bind
     ("M-Q"   . my:unfill-paragraph)
     ("C-x %" . my:eval-and-replace)
@@ -2263,12 +2357,14 @@ My own packages, you can get them from github with ~el-get~.
 
   (use-package semantic-pkg-config
     :el-get gynamics/semantic-pkg-config.el
-    :commands (semantic-pkg-config)
     )
 
   (use-package railgun
     :el-get gynamics/railgun.el
-    :commands (railgun-mode)
+    )
+
+  (use-package toc-glue
+    :el-get gynamics/toc-glue.el
     )
 #+end_src
 
