@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2025-01-01 Wed>
+#+date: <2025-02-25 Tue>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,8 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.3.0
-  ;; Package-Requires:
+  ;; Version: 5.4.0
 
   ;;; Commentary:
 
@@ -84,30 +83,30 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
   (let ((home (file-name-as-directory (getenv "HOME"))))
     ;; for some local tools, this should be added to PATH earlier
     (my:add-to-path (list (concat home ".local/bin")))
-    (let ((additional-path-list
-           (my:non-nil-list  ;; extend the value of EXEC-PATH and $PATH here
-            ;; for haskell
-            (concat home ".ghcup/bin")
-            (concat home ".cabal/bin")
-            ;; for rust
-            (concat home ".cargo/bin")
-            ;; for ruby
-            (when (executable-find "gem")
-              (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
-          (additional-env-list
-           (my:non-nil-list
-            ;; for go
-            `("GOPATH" ,(concat home ".go"))
-            ;; proxy (if you have one)
-            '("http_proxy" "http://127.0.0.1:2080")
-            '("https_proxy" "http://127.0.0.1:2080")
-            '("ALL_PROXY" "socks5://127.0.0.1:2080"))))
-      ;; add additional paths to PATH as well as exec-path
-      (my:add-to-path additional-path-list)
-      ;; set additional environment variables
-      (mapc (lambda (kv) (apply #'setenv kv)) additional-env-list)
-      ))
 
+    ;; add additional paths to PATH as well as exec-path
+    (my:add-to-path
+     (my:non-nil-list  ;; extend the value of EXEC-PATH and $PATH here
+      ;; for haskell
+      (concat home ".ghcup/bin")
+      (concat home ".cabal/bin")
+      ;; for rust
+      (concat home ".cargo/bin")
+      ;; for ruby
+      (when (executable-find "gem")
+        (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
+
+    ;; set additional environment variables
+    (mapc
+     (lambda (kv) (apply #'setenv kv))
+     (my:non-nil-list
+      ;; for go
+      `("GOPATH" ,(concat home ".go"))
+      ;; proxy (if you have one)
+      '("http_proxy" "http://127.0.0.1:2080")
+      '("https_proxy" "http://127.0.0.1:2080")
+      '("ALL_PROXY" "socks5://127.0.0.1:2080")))
+    )
 #+end_src
 
 Moreover, another annoying thing this is static paths to various files as arguments. To make is easier, there are several helpers help create or neglect missing files in initialization. A more generic implementation is expected here (e . g. add ~:depends~ or ~:import~ keywords to ~use-package~, that seems to be too complex)
@@ -305,7 +304,8 @@ The theme package of doomacs is good.
      . (lambda ()
          (load-theme 'doom-zenburn t)
          (doom-themes-visual-bell-config)
-         (doom-themes-treemacs-config)
+         ;; currently this only supports all-the-icons
+         ;; (doom-themes-treemacs-config)
          (doom-themes-org-config)))
     )
 #+end_src
@@ -401,6 +401,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
           ("TAB" . minibuffer-complete) ;; orig: vertico-insert
           ("C-<tab>" . vertico-insert)
           ("C-'" . vertico-quick-jump)
+          ("M-," . vertico-repeat)
           )
     )
 
@@ -642,8 +643,9 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
 
     :config
     ;; special display config
+    ;; c-macro-buffer-name
     (push '("*Macroexpansion*" :noselect t) popwin:special-display-config)
-    (push '("*Pp Macroexpansion Output*" :noselect t) popwin:special-display-config)
+    (push '("*Pp Macroexpand Output*" :noselect t) popwin:special-display-config)
     (push "*Pp Eval Output*" popwin:special-display-config)
 
     :bind-keymap
@@ -797,12 +799,19 @@ These are my collection, but not that important, or not used.
   ;; an alternative side bar, like neotree
   (use-package treemacs
     :ensure t
-    :when my/load-gui-config-p
     :custom
     (treemacs-position 'right)
     (treemacs-show-hidden-files nil)
     (treemacs-eldoc-display 'detailed)
     (treemacs-width 25)
+    )
+
+  (use-package treemacs-nerd-icons
+    :ensure t
+    :after treemacs
+    :demand t
+    :config
+    (treemacs-load-theme "nerd-icons")
     )
 
   ;; a fake mini code scroll map, with bad efficiency
@@ -1389,13 +1398,24 @@ They are FANTASTIC!!!
     (fancy-compilation-mode)
     )
 
-  (use-package hl-indent-scope
+  (use-package indent-bars
     :ensure t
-    :when my/load-gui-config-p
-    :custom-face
-    (hl-indent-scope-even-face ((t (:background "#686868"))))
-    (hl-indent-scope-odd-face ((t (:background "#535353"))))
-    :hook (prog-mode . hl-indent-scope-mode)
+    :config
+    (require 'indent-bars-ts)           ; not needed with straight
+    :custom
+    (indent-bars-no-descend-lists t) ; no extra bars in continued func arg lists
+    (indent-bars-treesit-support t)
+    (indent-bars-treesit-ignore-blank-lines-types '("module"))
+    ;; Add other languages as needed
+    (indent-bars-treesit-scope
+     '((python function_definition class_definition for_statement
+               if_statement with_statement while_statement)))
+    ;; Note: wrap may not be needed if no-descend-list is enough
+    ;;(indent-bars-treesit-wrap '((python argument_list parameters ; for python, as an example
+    ;;				      list list_comprehension
+    ;;				      dictionary dictionary_comprehension
+    ;;				      parenthesized_expression subscript)))
+    :hook (prog-mode . indent-bars-mode)
     )
 
   (use-package highlight-parentheses
@@ -1420,15 +1440,7 @@ They are FANTASTIC!!!
     :ensure t
     :diminish (rainbow-mode . "  ")
     :commands (rainbow-mode)
-    :init
-    ;; rainbow-mode is not compatible with hl-block
-    (add-hook
-     'rainbow-mode-hook
-     #'(lambda ()
-         (when hl-block-mode
-           (hl-block-mode -1)
-           (rainbow-turn-on))))
-    :hook ((html-mode css-mode js-mode) . rainbow-mode)
+    :hook ((sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode) . rainbow-mode)
     )
 
 #+end_src
@@ -1608,18 +1620,14 @@ Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitte
         '((bash "https://github.com/tree-sitter/tree-sitter-bash")
           (cmake "https://github.com/uyha/tree-sitter-cmake")
           (css "https://github.com/tree-sitter/tree-sitter-css")
-          (elisp "https://github.com/Wilfred/tree-sitter-elisp")
-          (go "https://github.com/tree-sitter/tree-sitter-go")
           (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
           (html "https://github.com/tree-sitter/tree-sitter-html")
           (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
           (json "https://github.com/tree-sitter/tree-sitter-json")
           (make "https://github.com/alemuller/tree-sitter-make")
-          (markdown "https://github.com/ikatyang/tree-sitter-markdown")
           (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
           (rust "https://github.com/tree-sitter/tree-sitter-rust")
           (python "https://github.com/tree-sitter/tree-sitter-python")
-          (toml "https://github.com/tree-sitter/tree-sitter-toml")
           (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
           (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
           (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
@@ -1628,13 +1636,14 @@ Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitte
         '((sh-mode . bash-ts-mode)
           (css-mode . css-ts-mode)
           (haskell-mode . haskell-ts-mode)
+          (html-mode . html-ts-mode)
           (js-mode . js-ts-mode)
-          (json-mode . json-ts-mode)
+          (js-json-mode . json-ts-mode)
           (python-mode . python-ts-mode)
           (ruby-mode . ruby-ts-mode)
           (rust-mode . rust-ts-mode)
           (typescript-mode . typescript-ts-mode)
-          (yaml-mode . yaml-ts-mode)))
+          (yaml-pro-mode . yaml-pro-ts-mode)))
 
   ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
   (mapc
@@ -1860,7 +1869,7 @@ Most of them are not configured and deferred.
   (use-package yaml-pro
     :ensure t
     :diminish " 🅨"
-    :hook (yaml-mode . yaml-pro-mode)
+    :mode ("\\.yaml\\'" . yaml-pro-mode)
     )
 
   (use-package markdown-mode
@@ -1909,7 +1918,23 @@ Most of them are not configured and deferred.
     (plantuml-default-exec-mode 'executable)
     )
 
-  (use-package adoc-mode :ensure t :mode ("\\.adoc\\'" . adoc-mode))
+  (use-package adoc-mode
+    :ensure t
+    :mode ("\\.adoc\\'" . adoc-mode)
+    )
+
+  (use-package web-mode
+    :ensure t
+    :mode
+    (("\\.phtml\\'" . web-mode)
+     ("\\.tpl\\.php\\'" . web-mode)
+     ("\\.[agj]sp\\'" . web-mode)
+     ("\\.as[cp]x\\'" . web-mode)
+     ("\\.erb\\'" . web-mode)
+     ("\\.mustache\\'" . web-mode)
+     ("\\.djhtml\\'" . web-mode))
+    )
+
   (use-package bison-mode :ensure t)
   (use-package disaster :ensure t)
   (use-package gnuplot :ensure t)
@@ -1920,11 +1945,9 @@ Most of them are not configured and deferred.
   (use-package nhexl-mode :ensure t)
   (use-package tuareg :ensure t)
   (use-package proof-general :ensure t)
-  (use-package purescript-mode :ensure t)
   (use-package riscv-mode :ensure t)
   (use-package rust-mode :ensure t)
   (use-package typescript-mode :ensure t)
-  (use-package web-mode :ensure t)
   (use-package tex :ensure auctex)
 #+end_src
 
@@ -1957,43 +1980,23 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-highlight-latex-and-related '(native latex script entities))
     (org-image-actual-width nil)
     (org-latex-compiler "xelatex")
-    (org-preview-latex-default-process 'magick)
     (org-latex-listings 'minted)
     (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz")))
     (org-latex-pdf-process
      '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
        "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
-    (org-modules
-     '(ol-bbdb ol-bibtex ol-docview ol-doi ol-eww ol-gnus ol-info ol-irc ol-mhe org-mouse ol-rmail org-tempo ol-w3m))
     (org-plantuml-jar-path "/usr/share/java/plantuml/plantuml.jar")
     (org-pretty-entities t)
     (org-pretty-entities-include-sub-superscripts nil)
     (org-support-shift-select t)
     (org-src-block-faces 'nil)
-    (org-src-lang-modes
-     '(("C" . c)
-       ("C++" . c++)
-       ("asymptote" . asy)
-       ("bash" . bash-ts)
-       ("beamer" . latex)
-       ("calc" . fundamental)
-       ("cpp" . c++)
-       ("ditaa" . ditaa)
-       ("dot" . graphviz-dot)
-       ("elisp" . emacs-lisp)
-       ("haskell" . haskell-ts)
-       ("ocaml" . tuareg)
-       ("python" . python-ts)
-       ("scheme" . scheme)
-       ("screen" . shell-script)
-       ("shell" . sh)
-       ("sqlite" . sql)
-       ("text" . text)))
     (org-startup-folded 'content)
     (org-startup-with-inline-images my/load-gui-config-p)
-    (org-todo-keywords '((sequence "TODO" "DONE" "PEND")))
+    (org-todo-keywords '((sequence "PEND" "TODO" "DONE")))
+    (org-todo-keyword-faces '(("PEND" . (:foreground "#F0DFAF" :weight bold))))
     (org-use-sub-superscripts nil)
     :config
+    ;; pdflatex is not very efficient, but only pdflatex supports tikz
     (add-to-list
      'org-preview-latex-process-alist
      '(magick
@@ -2007,6 +2010,15 @@ It is really interesting to write ~org-mode~ configurations in an org document.
        ("pdflatex -interaction nonstopmode -output-directory %o %f")
        :image-converter
        ("magick -density %D %f -trim -antialias -quality 100 %O")))
+
+    (setq org-preview-latex-default-process 'magick)
+
+    (mapc
+     (lambda (kv)
+       (setf (alist-get (car kv) org-src-lang-modes) (cdr kv)))
+     '(("haskell" . haskell-ts)
+       ("python" . python-ts)
+       ("scheme" . scheme)))
 
     (defun org-toggle-emphasis-markers ()
       "Toggle visibility of emphasis markers in current buffer."
@@ -2060,27 +2072,6 @@ It is really interesting to write ~org-mode~ configurations in an org document.
   (use-package org-edit-indirect
     :ensure t
     :hook (org-mode . org-edit-indirect-mode)
-    )
-
-  (use-package org-modern
-    :ensure t
-    :when my/load-gui-config-p
-    :custom
-    (org-modern-block-fringe nil)
-    (org-modern-table nil)
-    (org-modern-block-name '("Σ " "∎ "))
-    (org-modern-star 'replace)
-    (org-modern-hide-stars ".")
-    (org-modern-keyword "☯ ")
-    (org-modern-priority-faces '((?A :foreground "black" :background "red")
-                                 (?B :foreground "black" :background "orange")
-                                 (?C :foreground "black" :background "yellow")))
-    (org-modern-todo-faces '(("TODO" :foreground "white" :background "deep sky blue" )
-                             ("DOWN" :foreground "black" :background "dark green")
-                             ("PEND" :foreground "black" :background "dark orange")))
-    :hook
-    (org-mode . org-modern-mode)
-    (org-agenda-finalize . org-modern-agenda)
     )
 
   (use-package org-download
@@ -2156,6 +2147,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
   (use-package org-roam
     :ensure t
     :defines org-roam-cmd-map
+    :after org
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
     (org-roam-database-connector 'sqlite-builtin)
@@ -2190,7 +2182,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
 
   (use-package org-roam-ql
     :ensure t
-    :after (org-roam)
+    :after org-roam
     :bind
     (:map org-roam-cmd-map
           ("s" . org-roam-ql-search)
