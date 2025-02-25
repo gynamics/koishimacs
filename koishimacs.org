@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.4.0
+  ;; Version: 5.5.0
 
   ;;; Commentary:
 
@@ -153,7 +153,9 @@ As for package configuration, we will use ~use-package.el~, which provides conve
        ("melpa" . "https://mirrors.tuna.tsinghua.edu.cn/elpa/melpa/")
        ;; ("melpa-stable" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/stable-melpa/")
        ;; ("org" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/org/")
-       )))
+       ))
+   '(package-quickstart t)
+   )
 #+end_src
 
 To accelerate emacs startup we can do:
@@ -171,7 +173,10 @@ To accelerate emacs startup we can do:
 
   ;; involve this to make use-package find personal-keybindings on compiling
   ;; (use-package bind-key :demand t)
-  (use-package diminish :ensure t)
+  (use-package diminish
+    :ensure t
+    :when (find-font (font-spec :name "Symbols Nerd Font Mono"))
+    )
 #+end_src
 
 Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
@@ -179,7 +184,7 @@ Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file
 BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
 
 #+begin_src emacs-lisp
-  (use-package org :ensure t :autoload org-babel-tangle-file)
+  (use-package org :demand t)
 
   (defun my:regenerate-koishimacs-config (byte-compile-p)
     "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
@@ -233,16 +238,6 @@ With package ~el-get~ we will be able to get packages from other sources like gi
        `((el-get-bundle ,@args))
        (use-package-process-keywords name rest state)))
     )
-#+end_src
-
-** early ensure
-These packages are registered to ~prog-mode-hook~ and ~emacs-lisp-mode~ inherits this hook, so we had better declare them early here to avoid compile errors on bootstrap.
-
-#+begin_src emacs-lisp
-  (use-package company :ensure t)
-  (use-package flycheck :ensure t)
-  (use-package lsp-ui :ensure t)
-  (use-package yasnippet :ensure t)
 #+end_src
 
 * UI
@@ -304,8 +299,6 @@ The theme package of doomacs is good.
      . (lambda ()
          (load-theme 'doom-zenburn t)
          (doom-themes-visual-bell-config)
-         ;; currently this only supports all-the-icons
-         ;; (doom-themes-treemacs-config)
          (doom-themes-org-config)))
     )
 #+end_src
@@ -557,11 +550,11 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :bind ("M-g f" . consult-flycheck)              ;; Alternative: consult-flymake
     )
 
-  (use-package consult-lsp
+  (use-package consult-eglot
     :ensure t
     :bind
-    (:map lsp-mode-map
-          ([remap xref-find-apropos] . consult-lsp-symbols))
+    (:map eglot-mode-map
+          ([remap xref-find-apropos] . consult-eglot-symbols))
     )
 
   (use-package embark
@@ -611,7 +604,7 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
                popwin:stick-popup-window
                popwin:close-popup-window
                )
-    :init
+    :preface
     (defmacro my:popwin:create (name body)
       `(let ((buf-name ,name))
          (unless (buffer-live-p buf-name)
@@ -627,6 +620,7 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
            ,creator
            (popwin:stick-popup-window))))
 
+    :init
     (defun my:popwin:scratch ()
       "Show *scratch* in a popwin, if not exist, create it."
       (interactive)
@@ -644,9 +638,9 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     :config
     ;; special display config
     ;; c-macro-buffer-name
-    (push '("*Macroexpansion*" :noselect t) popwin:special-display-config)
-    (push '("*Pp Macroexpand Output*" :noselect t) popwin:special-display-config)
-    (push "*Pp Eval Output*" popwin:special-display-config)
+    (add-to-list 'popwin:special-display-config '("*Macroexpansion*" :noselect t))
+    (add-to-list 'popwin:special-display-config '("*Pp Macroexpand Output*" :noselect t) )
+    (add-to-list 'popwin:special-display-config "*Pp Eval Output*")
 
     :bind-keymap
     ("C-z" . popwin:keymap)
@@ -659,6 +653,7 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
      ("v" . my:popwin:vterm)
      ("x" . my:popwin:eshell)
      ("c" . my:popwin:scratch)
+     ("d" . my:popwin:eldoc)
      )
     )
 
@@ -755,6 +750,7 @@ Dired is powerful but rough, dirvish polished it.
   (use-package dirvish
     :ensure t
     :init
+    (require 'server)
     (dirvish-override-dired-mode)
     :custom
     (dirvish-attributes
@@ -770,6 +766,43 @@ Dired is powerful but rough, dirvish polished it.
           (">" . dirvish-history-jump)
           ("/" . dirvish-fd)
           )
+    )
+#+end_src
+
+** sideline
+Sideline is useful to display information related to current line.
+
+#+begin_src emacs-lisp
+  (use-package sideline
+    :ensure t
+    :diminish (sideline-mode . " 󱁑")
+    :init
+    (setq
+     sideline-backends-left-skip-current-line t
+     sideline-backends-right-skip-current-line t
+     sideline-order-left 'down
+     sideline-order-right 'up
+     sideline-format-left "%s   "
+     sideline-format-right "   %s"
+     sideline-priority 100
+     sideline-display-backend-name t
+     )
+    :hook
+    (flycheck-mode . sideline-mode)
+    (eglot-mode . sideline-mode)
+    )
+
+  (use-package sideline-eglot
+    :ensure t
+    :init
+    (setq sideline-backends-left '(sideline-eglot))
+    )
+
+  (use-package sideline-flycheck
+    :ensure t
+    :init
+    (setq sideline-backends-right '(sideline-flycheck))
+    :hook (flycheck-mode . sideline-flycheck-setup)
     )
 #+end_src
 
@@ -796,24 +829,6 @@ These are my collection, but not that important, or not used.
     ("C-S-<prior>" . centaur-tabs-backward-group)
     )
 
-  ;; an alternative side bar, like neotree
-  (use-package treemacs
-    :ensure t
-    :custom
-    (treemacs-position 'right)
-    (treemacs-show-hidden-files nil)
-    (treemacs-eldoc-display 'detailed)
-    (treemacs-width 25)
-    )
-
-  (use-package treemacs-nerd-icons
-    :ensure t
-    :after treemacs
-    :demand t
-    :config
-    (treemacs-load-theme "nerd-icons")
-    )
-
   ;; a fake mini code scroll map, with bad efficiency
   (use-package minimap
     :ensure t
@@ -838,7 +853,6 @@ A big but useless thing.
   (use-package dashboard
     :ensure t
     :when (display-graphic-p)
-    :diminish (dashboard-mode . " 󰕮")
     :init
     ;; because these packages are placed later,
     ;; we have to specify these autoloads here.
@@ -930,13 +944,12 @@ alignment is needed.
           (eval `(set-fontset-font ,@conf))
         (error (message "failed to apply set-fontset-font to %S" conf)))))
 
-  (when (display-graphic-p)
-    ;; (set-frame-position (selected-frame) 60 60)
-    (set-frame-size (selected-frame) 120 40)
-    )
-
   (when my/load-gui-config-p
     (my:setup-default-fontset my/fontset-config)
+    ;; set font faces
+    (custom-set-faces
+     '(fixed-pitch-serif ((t (:weight bold :family "DejaVu Sans Mono"))))
+     )
     ;; set default frame title
     (setq-default frame-title-format
                   (concat "KoishiMACs   👁️   %b   🖊️   " (user-login-name) "@" (system-name)))
@@ -946,6 +959,13 @@ alignment is needed.
     ;; toggle pixel scrolling
     (pixel-scroll-precision-mode)
     )
+
+  ;; resize initial window when in GUI but not a client
+  (when (display-graphic-p)
+    ;; (set-frame-position (selected-frame) 60 60)
+    (set-frame-size (selected-frame) 120 40)
+    )
+
 #+end_src
 
 Setup for server edit: always create a new frame, delete frame when done.
@@ -970,28 +990,6 @@ Setup for server edit: always create a new frame, delete frame when done.
     (custom-set-variables '(server-kill-new-buffers t))
     (global-set-key (kbd "C-x C-c") (kbd "C-x # C-x 5 0"))
     )
-#+end_src
-
-Terminal mode configuration, actually there are very little we can do
-to the emacsclient. Just assume that clients are all graphic frames.
-
-#+begin_src emacs-lisp
-  (unless my/load-gui-config-p
-    (xterm-mouse-mode))
-
-  (defvar arrow-keys-map (make-sparse-keymap)
-    "Keymap for arrow keys")
-
-  (bind-keys
-   :map arrow-keys-map
-   ("A" [up])
-   ("B" [down])
-   ("C" [right])
-   ("D" [left]))
-  ;; arrow keys may be broken in some terminals,
-  ;; define a wrapper to translate ESC [ or ESC O
-  (define-key esc-map "[" arrow-keys-map)
-  (define-key esc-map "O" arrow-keys-map)
 #+end_src
 
 * Text Editor
@@ -1034,7 +1032,8 @@ A hacker can fly across lines and frames.
 
   (use-package windower
     :ensure t
-    :commands (windower-toggle-single windower-toggle-split)
+    :autoload (windower-toggle-single
+               windower-toggle-split)
     :bind
     (("M-1" . windower-toggle-single)
      ("M-2" . windower-toggle-split)
@@ -1096,6 +1095,7 @@ More previews and visual feedback.
 
 #+begin_src emacs-lisp
   (use-package yasnippet
+    :ensure t
     :diminish (yas-minor-mode . " 󰰳")
     :hook ((org-mode prog-mode) . yas-minor-mode)
     :defines yas-minor-mode-map
@@ -1379,7 +1379,8 @@ They are FANTASTIC!!!
     :ensure t
     :when my/load-gui-config-p
     :diminish (diff-hl-mode . "  ")
-    :commands (diff-hl-mode global-diff-hl-mode)
+    :commands (diff-hl-mode
+               global-diff-hl-mode)
     :hook
     (magit-pre-refresh  . diff-hl-magit-pre-refresh)
     (magit-post-refresh . diff-hl-magit-post-refresh)
@@ -1451,7 +1452,7 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 #+begin_src emacs-lisp
   (use-package flycheck
     :ensure t
-    :diminish (flycheck-mode . "  ")
+    :diminish (flycheck-mode . " 󱖉")
     :hook
     (prog-mode . flycheck-mode)
     (emacs-lisp-mode
@@ -1461,16 +1462,9 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
            (flycheck-mode -1))))
     )
 
-  (use-package flycheck-aspell :ensure t)
-
   (use-package flycheck-guile
     :ensure t
     :hook (geiser-mode . (lambda () (require 'flycheck-guile))))
-
-  (use-package flycheck-haskell
-    :ensure t
-    :hook (haskell-mode . flycheck-haskell-setup)
-    )
 
   (use-package flycheck-pkg-config
     :ensure t
@@ -1487,7 +1481,7 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
     )
 
   (use-package flymake
-    :diminish (flymake-mode . " 󰮄")
+    :diminish (flymake-mode . " 󱖊")
     :bind
     (:map flymake-mode-map
           ("C-x ! d" . flymake-show-buffer-diagnostics)
@@ -1514,13 +1508,8 @@ We get two nice UI: box and overlay. Box is more flexible while overlay is coole
     :ensure t
     :diminish eldoc-box-hover-at-point-mode
     :diminish eldoc-box-hover-mode
-    :commands (eldoc-box-hover-at-point-mode)
-    )
-
-  (use-package helpful
-    :ensure t
     :bind
-    ("C-h C-." . helpful-at-point)
+    ("C-c d" . eldoc-box-help-at-point)
     )
 #+end_src
 
@@ -1531,6 +1520,7 @@ Gnu global is much faster than ctags for emacs.
   (use-package gtags-mode
     :diminish " 󰓼"
     :ensure t
+    :hook (c-mode . gtags-mode)
     )
 
   ;; xref-union allow us to use multiple xref backends together
@@ -1568,63 +1558,46 @@ Emacs has introduced built-in Language Server Protocol (LSP) support
 since emacs29, with ~eglot~ package. This package has no extra
 dependencies, and provides out-of-box lsp client service.
 
-~lsp-mode~ is a more sophisticated package which provides more
-features. One nice feature I like is ~lsp-ui-sideline~.  Actually there
-is already an independent package ~sideline-lsp~ but sideline is enabled
-automatically with ~lsp-ui~, and that UI works without lsp connected. So
-we will use ~lsp-ui~ as our default UI in ~prog-mode~.
-
 #+begin_src emacs-lisp
   (use-package eglot
     :config
-    (setf (alist-get 'haskell-mode eglot-server-programs)
-          '(haskell-mode haskell-ts-mode))
+    ;; currently haskell-ts-mode is not supported yet
+    (setf (alist-get 'haskell-ts-mode eglot-server-programs)
+          '("haskell-language-server-wrapper" "--lsp"))
     :bind
     (:map eglot-mode-map
-          :prefix-map eglot-command-map
-          :prefix "C-S-l"
-          ("a" . eglot-code-actions)
-          ("d" . eldoc)
-          ("=" . eglot-format)
-          ("r" . eglot-rename))
+          ("C-c a" . eglot-code-actions)
+          ("C-c =" . eglot-format)
+          ("C-c :" . eglot-rename))
     )
 
-  (use-package lsp-mode
+  ;; a header line for hints
+  (use-package breadcrumb
     :ensure t
-    :defines lsp-command-map
-    :custom
-    (lsp-keymap-prefix "C-S-l")
+    :hook (eglot-mode . breadcrumb-local-mode)
     )
-
-  (use-package ccls :ensure t)
-  (use-package lsp-haskell :ensure t)
-
-  (use-package lsp-ui
-    :ensure t
-    :bind
-    (:map lsp-command-map
-          ("d" . lsp-ui-doc-toggle)
-          ("i" . lsp-ui-imenu)
-          )
-    :hook (prog-mode . lsp-ui-mode)
-    )
-
-  (use-package lsp-treemacs :ensure t)
 #+end_src
 
 Finally we get something cooler in emacs29+, treesit is merged into emacs!
-Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitter][this article]].
+
+Tree-sitter is a parser generator for creating *incremental* parsers, which provides us many efficient language parsers for syntactic highlighting, code alignment and navigation, etc.
+
+Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitter][this article]].
 
 #+begin_src emacs-lisp
   (setq treesit-language-source-alist
         '((bash "https://github.com/tree-sitter/tree-sitter-bash")
+          (c "https://github.com/tree-sitter/tree-sitter-c")
+          (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
           (cmake "https://github.com/uyha/tree-sitter-cmake")
           (css "https://github.com/tree-sitter/tree-sitter-css")
+          (go "https://github.com/tree-sitter/tree-sitter-go")
           (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
           (html "https://github.com/tree-sitter/tree-sitter-html")
+          (java "https://github.com/tree-sitter/tree-sitter-java")
           (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
           (json "https://github.com/tree-sitter/tree-sitter-json")
-          (make "https://github.com/alemuller/tree-sitter-make")
+          (lua "https://github.com/tree-sitter-grammars/tree-sitter-lua")
           (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
           (rust "https://github.com/tree-sitter/tree-sitter-rust")
           (python "https://github.com/tree-sitter/tree-sitter-python")
@@ -1633,17 +1606,20 @@ Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitte
           (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
 
   (setq major-mode-remap-alist
-        '((sh-mode . bash-ts-mode)
-          (css-mode . css-ts-mode)
+        '((css-mode . css-ts-mode)
+          (go-mode . go-ts-mode)
+          (go-mod-mode . go-mod-ts-mode)
           (haskell-mode . haskell-ts-mode)
           (html-mode . html-ts-mode)
+          (java-mode . java-ts-mode)
           (js-mode . js-ts-mode)
           (js-json-mode . json-ts-mode)
+          (lua-mode . lua-ts-mode)
           (python-mode . python-ts-mode)
           (ruby-mode . ruby-ts-mode)
           (rust-mode . rust-ts-mode)
-          (typescript-mode . typescript-ts-mode)
-          (yaml-pro-mode . yaml-pro-ts-mode)))
+          (tsx-mode . tsx-ts-mode)
+          (typescript-mode . typescript-ts-mode)))
 
   ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
   (mapc
@@ -1655,6 +1631,16 @@ Following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitte
          (add-hook major-ts-mode-hook
                    `(lambda () (run-hooks (quote ,major-mode-hook))))))
    major-mode-remap-alist)
+
+  ;; We may enable some built-in treesit modes directly to be lazy
+  (use-package treesit
+    :init
+    (when (treesit-ready-p 'cmake t)
+      (add-to-list 'auto-mode-alist
+                   '("\\(?:CMakeLists\\.txt\\|\\.cmake\\)\\'" . cmake-ts-mode)))
+    (when (treesit-ready-p 'yaml t)
+      (add-to-list 'auto-mode-alist '("\\.ya?ml\\'" . yaml-ts-mode)))
+    )
 #+end_src
 
 ** code formatter
@@ -1703,15 +1689,9 @@ With this package we can also prettify the c macro expansion, which is not prett
 #+end_src
 
 ** project management
-Manage and navigate projects easily.
+Since Emacs 28, Emacs has integrated ~project.el~ for project management. So we don't need projectile anymore. ~projection~ provides specific support for different types of projects.
 
 #+begin_src emacs-lisp
-  (use-package projectile
-    :ensure t
-    :bind-keymap
-    ("C-c p" . projectile-command-map)
-    )
-
   (use-package projection
     :ensure t
     :after project
@@ -1723,15 +1703,15 @@ Manage and navigate projects easily.
 
   (use-package projection-multi
     :ensure t
-    ;; Allow interactively selecting available compilation targets from the current
-    ;; project type.
+    ;; Allow interactively selecting available compilation targets from
+    ;; the current project type.
     :bind
     (:map project-prefix-map
           ("RET" . projection-multi-compile))
     )
 #+end_src
 
-Load ~magit~ configuration after ~windower~ to avoid keybinding conflicts.
+Git is the most popular version control tool, and ~magit~ provides the Emacs interface of it.
 
 #+begin_src emacs-lisp
   (use-package magit
@@ -1784,23 +1764,10 @@ Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++
 ** debugger
 It is not a fashionable thing to debug in Emacs, most modern IDEs integrates their own debugger. However, that does not mean Emacs is not good at do that. Emacs has good support for many debuggers, especially GDB.
 
-Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp.
+Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, and ~dape~ is something flyweight.
 
 #+begin_src emacs-lisp
-  (use-package dap-mode
-    :ensure t
-    :custom
-    (dap-auto-configure-features '(sessions locals controls tooltip))
-    :config
-    (require 'dap-lldb)
-    (dap-register-debug-template "Rust::GDB Run Configuration"
-                                 (list :type "gdb"
-                                       :request "launch"
-                                       :name "GDB::Run"
-                                       :gdbpath "rust-gdb"
-                                       :target nil
-                                       :cwd nil))
-    )
+  (use-package dape :ensure t)
 #+end_src
 
 ** language-specific supports
@@ -1809,12 +1776,11 @@ Most of them are not configured and deferred.
 #+begin_src emacs-lisp
   (use-package haskell-mode
     :ensure t
-    :autoload (haskell-hoogle)
+    :autoload (haskell-compile
+               haskell-hoogle
+               haskell-interactive-bring
+               run-haskell)
     :bind
-    (:map haskell-mode-map
-          ("C-c C-s" . haskell-hoogle)
-          ("C-c C-r" . haskell-interactive-bring)
-          ("C-c C-c" . haskell-compile))
     (:map haskell-cabal-mode-map
           ("C-c C-c" . haskell-compile))
     )
@@ -1824,8 +1790,12 @@ Most of them are not configured and deferred.
     :custom
     (haskell-ts-highlight-signature t)
     :bind
+    ;; use commands provided by `inferior-haskell-mode'
     (:map haskell-ts-mode-map
-          ("C-c C-s" . haskell-hoogle))
+          ("C-c C-c" . haskell-compile)
+          ("C-c C-s" . haskell-hoogle)
+          ("C-c C-d" . haskell-interactive-bring)
+          ("C-c C-r" . run-haskell))
     )
 
   (use-package python
@@ -1864,12 +1834,6 @@ Most of them are not configured and deferred.
     :ensure t
     :diminish " 󰅴"
     :hook (nxml-mode . auto-rename-tag-mode)
-    )
-
-  (use-package yaml-pro
-    :ensure t
-    :diminish " 🅨"
-    :mode ("\\.yaml\\'" . yaml-pro-mode)
     )
 
   (use-package markdown-mode
@@ -2039,7 +2003,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     )
 
   (use-package simple
-    :diminish (visual-line-mode . " 󱇂")
+    :diminish (visual-line-mode . " 󰴐")
     :hook (org-mode . visual-line-mode)
     :bind
     ("C-c v l" . visual-line-mode)
@@ -2087,7 +2051,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :bind
     (:map org-mode-map
           :prefix-map org-download-cmd-map
-          :prefix "C-c d"
+          :prefix "C-c y"
           ("c" . org-download-clipboard)
           ("e" . org-download-edit)
           ("i" . org-download-image)
@@ -2360,24 +2324,6 @@ My own packages, you can get them from github with ~el-get~.
     )
 #+end_src
 
-** miscellaneous keybindings
-
-#+begin_src emacs-lisp
-  (bind-keys
-   ([remap list-buffers]    . ibuffer)
-   ([remap eval-last-sexp]  . pp-eval-last-sexp)
-   ([remap eval-expression] . pp-eval-expression)
-   ([remap dabbrev-expand]  . hippie-expand)
-   ("C-x M-e" . pp-macroexpand-last-sexp)
-   ("C-x M-s" . macrostep-mode)
-   ("C-c v SPC" . whitespace-mode)
-   )
-
-  ;; enable some disabled functions
-  (put 'downcase-region 'disabled nil) ;; C-x C-l
-  (put 'upcase-region 'disabled nil)   ;; C-x C-u
-#+end_src
-
 ** miscellaneous configurations
 
 #+begin_src emacs-lisp
@@ -2389,30 +2335,76 @@ My own packages, you can get them from github with ~el-get~.
     (add-to-list 'recentf-keep 'file-remote-p)
     )
 
-  ;; prettify symbols
-  (customize-set-variable 'prettify-symbols-unprettify-at-point 'right-edge)
-  (add-hook 'prog-mode-hook #'prettify-symbols-mode)
-
-  ;; display line numbers
-  (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+  ;; some general configurations
+  (use-package emacs
+    :custom
+    (blink-cursor-mode nil)
+    (column-number-mode t)
+    (delete-by-moving-to-trash t)
+    (indent-tabs-mode nil)
+    (inhibit-startup-screen t)
+    (native-comp-async-report-warnings-errors nil)
+    (prettify-symbols-unprettify-at-point 'right-edge)
+    (scroll-bar-mode nil)
+    (size-indication-mode t)
+    (tab-always-indent t)
+    (tool-bar-mode nil)
+    (undo-limit (expt 2 20))
+    ;; do not make backups
+    (make-backup-files nil)
+    ;; or, save backups in a specific directory if necessary
+    ;; (backup-directory-alist
+    ;;  `(("." . ,(concat user-emacs-directory "backups")))
+    :bind
+    ([remap list-buffers]    . ibuffer)
+    ([remap eval-last-sexp]  . pp-eval-last-sexp)
+    ([remap eval-expression] . pp-eval-expression)
+    ([remap dabbrev-expand]  . hippie-expand)
+    ("C-x M-e" . pp-macroexpand-last-sexp)
+    ("C-x M-s" . macrostep-mode)
+    ("C-c v SPC" . whitespace-mode)
+    )
 
   ;; cleanup whitespaces on save
-  (defun cleanup-wsp-on-save ()
+  (defun cleanup-whitespaces-on-save ()
     (make-local-variable 'before-save-hook)
     (add-hook 'before-save-hook ;; make it buffer-local
               #'(lambda () (whitespace-cleanup)) nil t)
     )
-  (add-hook 'prog-mode-hook #'cleanup-wsp-on-save)
 
-  ;; do not make backups
-  (customize-set-variable 'make-backup-files nil)
-  ;; or, save backups in a specific directory if necessary
-  ;; (customize-set-variable
-  ;;  'backup-directory-alist
-  ;;  `(("." . ,(concat user-emacs-directory "~/.emacs/backups")))
+  (use-package prog-mode
+    :hook
+    (prog-mode . prettify-symbols-mode)
+    (prog-mode . display-line-numbers-mode)
+    (prog-mode . cleanup-whitespaces-on-save)
+    )
 
-  ;; safe deletion
-  (customize-set-variable 'delete-by-moving-to-trash t)
+  ;; enable some disabled functions
+  (put 'downcase-region 'disabled nil) ;; C-x C-l
+  (put 'upcase-region 'disabled nil)   ;; C-x C-u
+#+end_src
+
+** tui
+Terminal mode configuration, actually there are very little we can do
+to the emacsclient. Just assume that clients are all graphic frames.
+
+#+begin_src emacs-lisp
+  (unless my/load-gui-config-p
+    (xterm-mouse-mode))
+
+  (defvar arrow-keys-map (make-sparse-keymap)
+    "Keymap for arrow keys")
+
+  (bind-keys
+   :map arrow-keys-map
+   ("A" [up])
+   ("B" [down])
+   ("C" [right])
+   ("D" [left]))
+  ;; arrow keys may be broken in some terminals,
+  ;; define a wrapper to translate ESC [ or ESC O
+  (define-key esc-map "[" arrow-keys-map)
+  (define-key esc-map "O" arrow-keys-map)
 #+end_src
 
 ** footer

@@ -33,32 +33,12 @@
 (setq gc-cons-threshold (expt 2 26)
       gc-cons-percentage 0.15)
 
-;; only keep a minimal subset of native features for custom
-(custom-set-variables
- ;; custom-set-variables was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
- '(blink-cursor-mode nil)
- '(column-number-mode t)
- '(enable-recursive-minibuffers t)
- '(indent-tabs-mode nil)
- '(inhibit-startup-screen t)
- '(native-comp-async-report-warnings-errors nil)
- '(package-quickstart t)
- '(scroll-bar-mode nil)
- '(size-indication-mode t)
- '(tab-always-indent t)
- '(tool-bar-mode nil)
- '(undo-limit (expt 2 20)))
-
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 130 :width normal))))
- '(fixed-pitch-serif ((t (:weight bold :family "DejaVu Sans Mono")))))
+ '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 120 :width normal)))))
 
 ;; Don't attempt to find/apply special file handlers to files loaded during startup.
 (let ((file-name-handler-alist nil)
