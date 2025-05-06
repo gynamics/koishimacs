@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2025-02-25 Tue>
+#+date: <2025-04-27 Sun>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.5.0
+  ;; Version: 5.6.0
 
   ;;; Commentary:
 
@@ -47,69 +47,7 @@ By (3), ~org-mode~ can organize everything for me. I do not need a sparse direct
 My main goal is to produce a portable configuration that can be easily ported to a new machine, and then keep iterating with it. If you believe that there will never be an ultimate Emacs configuration for you, then why not embrace this stinging world and enjoy a thorny road?
 
 ** environment
-~setenv~ will just set environment variable for current emacs process, in ~process-environment~.
-
-However, if we start a subprocess from emacs, it uses environment variables inherited from the parent process of Emacs, which provides ~initial-environment~. To change this, we should modify variable ~exec-path~.
-
-#+begin_src emacs-lisp
-  (defun my:add-to-env-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
-    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
-      (dolist (path additional-path-list)
-        (add-to-list 'exec-path path-string))
-      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
-
-  (defun my:add-to-exec-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
-    (dolist (path additional-path-list)
-      (add-to-list 'exec-path path-string)))
-
-  (defun my:add-to-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to both $PATH and EXEC-PATH."
-    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
-      (dolist (path additional-path-list)
-        (add-to-list 'exec-path path)
-        (add-to-list 'env-path-list path))
-      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
-
-  (defun my:non-nil-list (&rest args)
-    "Construct a non-nil list with ARGS, remove nils in ARGS."
-    (if (null args)
-        nil
-      (let ((head (car args))
-            (tail (apply #'my:non-nil-list (cdr args))))
-        (if (null head) tail (cons head tail)))))
-
-  (let ((home (file-name-as-directory (getenv "HOME"))))
-    ;; for some local tools, this should be added to PATH earlier
-    (my:add-to-path (list (concat home ".local/bin")))
-
-    ;; add additional paths to PATH as well as exec-path
-    (my:add-to-path
-     (my:non-nil-list  ;; extend the value of EXEC-PATH and $PATH here
-      ;; for haskell
-      (concat home ".ghcup/bin")
-      (concat home ".cabal/bin")
-      ;; for rust
-      (concat home ".cargo/bin")
-      ;; for ruby
-      (when (executable-find "gem")
-        (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
-
-    ;; set additional environment variables
-    (mapc
-     (lambda (kv) (apply #'setenv kv))
-     (my:non-nil-list
-      ;; for go
-      `("GOPATH" ,(concat home ".go"))
-      ;; proxy (if you have one)
-      '("http_proxy" "http://127.0.0.1:2080")
-      '("https_proxy" "http://127.0.0.1:2080")
-      '("ALL_PROXY" "socks5://127.0.0.1:2080")))
-    )
-#+end_src
-
-Moreover, another annoying thing this is static paths to various files as arguments. To make is easier, there are several helpers help create or neglect missing files in initialization. A more generic implementation is expected here (e . g. add ~:depends~ or ~:import~ keywords to ~use-package~, that seems to be too complex)
+There are several helpers help create or neglect missing files in initialization. A more generic implementation is expected here (e . g. add ~:depends~ or ~:import~ keywords to ~use-package~, but this seems to be unnecessary)
 
 #+begin_src emacs-lisp
   (defun my:strong-directory (dir &optional parents)
@@ -137,6 +75,67 @@ Moreover, another annoying thing this is static paths to various files as argume
       (set sym dir)))
 #+end_src
 
+~setenv~ will just set environment variable for current emacs process, in ~process-environment~.
+
+However, if we start a subprocess from emacs, it uses environment variables inherited from the parent process of Emacs, which provides ~initial-environment~. To change this, we should modify variable ~exec-path~.
+
+#+begin_src emacs-lisp
+  (defun my:add-to-env-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
+    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
+      (dolist (path additional-path-list)
+        (add-to-list 'exec-path path-string))
+      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
+
+  (defun my:add-to-exec-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
+    (dolist (path additional-path-list)
+      (add-to-list 'exec-path path-string)))
+
+  (defun my:add-to-path (additional-path-list)
+    "Add path strings in ADDITIONAL-PATH-LIST to both $PATH and EXEC-PATH."
+    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
+      (dolist (path additional-path-list)
+        (add-to-list 'exec-path path)
+        (add-to-list 'env-path-list path))
+      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
+
+  (defun my:strip-list (&rest args)
+    "Construct a list with ARGS, remove nils in ARGS."
+    (mapcan (lambda (arg) (when arg (list arg))) args))
+
+  (let ((home (file-name-as-directory (getenv "HOME"))))
+    ;; for some local tools, this should be added to PATH earlier
+    (my:add-to-path
+     (my:strip-list
+      (my:weak-directory (concat home ".local/bin"))))
+
+    ;; add additional paths to PATH as well as exec-path
+    (my:add-to-path
+     (my:strip-list  ;; extend the value of EXEC-PATH and $PATH here
+      ;; for haskell
+      (my:weak-directory (concat home ".ghcup/bin"))
+      (my:weak-directory (concat home ".cabal/bin"))
+      ;; for rust
+      (my:weak-directory (concat home ".cargo/bin"))
+      ;; for ruby
+      (when (executable-find "gem")
+        (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
+
+    ;; set additional environment variables
+    (mapc
+     (lambda (kv) (apply #'setenv kv))
+     (my:strip-list
+      ;; for go
+      (when (file-directory-p (concat home ".go"))
+        `("GOPATH" ,(concat home ".go")))
+      ;; proxy (if you have one)
+      '("http_proxy" "http://127.0.0.1:2080")
+      '("https_proxy" "http://127.0.0.1:2080")
+      '("ALL_PROXY" "socks5://127.0.0.1:2080")))
+    )
+#+end_src
+
 ** package manager
 As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~. First we should pick up a fast ELPA mirror for ~package.el~ :
 
@@ -154,12 +153,11 @@ As for package configuration, we will use ~use-package.el~, which provides conve
        ;; ("melpa-stable" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/stable-melpa/")
        ;; ("org" . "http://mirrors.tuna.tsinghua.edu.cn/elpa/org/")
        ))
-   '(package-quickstart t)
    )
 #+end_src
 
 To accelerate emacs startup we can do:
-1. pacakge quickstart. This feature is provided after emacs 27, which supports compile all loaddefs into one single ~package-quickstart.el~ to avoid openning too much loaddef files.
+1. pacakge quickstart. This feature is provided after emacs 27, which supports compile all loaddefs into one single ~package-quickstart.el~ to avoid openning too much loaddef files. This is enabled in [[file:init.el][init.el]].
 2. lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
 
 #+begin_src emacs-lisp
@@ -167,6 +165,7 @@ To accelerate emacs startup we can do:
     :demand t
     :custom
     (use-package-always-defer t)
+    (use-package-vc-prefer-newest t)
     ;; set up this to get package loading statistics
     (use-package-compute-statistics t)
     )
@@ -224,20 +223,45 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
     )
 #+end_src
 
-With package ~el-get~ we will be able to get packages from other sources like github. Here we define a ~:el-get~ keyword for ~use-package~ to invoke ~el-get-bundle~.
+** hook decorators
+Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may break elisp bytecompile. So I decided to add decorators to such hooks to avoid direct binding to it.
 
 #+begin_src emacs-lisp
-  (use-package el-get
-    :ensure t
-    :init
-    ;; idea from kurubushi's use-package--el-get.el
-    (setq use-package-keywords (cons :el-get use-package-keywords))
-    (defalias 'use-package-normalize/:el-get 'use-package-normalize-symlist)
-    (defun use-package-handler/:el-get (name keyword args rest state)
-      (use-package-concat
-       `((el-get-bundle ,@args))
-       (use-package-process-keywords name rest state)))
-    )
+  (defvar my/hook-decorators nil
+    "A alist of hook decorators, items in (HOOK-NAME . LOADER).")
+
+  (defmacro my:define-hook-decorator (mode &optional loader)
+    "Define a hook decorator for given name MODE."
+    (unless (symbolp mode)
+      (error "%s is not a symbol!" mode))
+    `(let ((decorator
+            ',(intern (concat "my/" (symbol-name mode) "-hook")))
+           (docstring
+            ,(concat "Hook decorator for `" (symbol-name mode) "'.")))
+       ;; define a variable for it using `defvar'
+       (eval `(defvar ,decorator nil ,docstring))
+       (let* ((orig
+               ',(intern (concat (symbol-name mode) "-hook"))))
+         ;; set a loader for that hook decorator
+         (setf (alist-get decorator my/hook-decorators)
+               (if (and ,loader (functionp ,loader))
+                   ,loader
+                 (lambda ()
+                   (with-eval-after-load ',mode
+                     (eval `(setf ,orig
+                                  (nconc ,orig ,decorator))))))))))
+
+  (defun my:inject-hook-decorators ()
+    "Inject hook decorators to those hooks to be decorated."
+    (mapc (lambda (decorator) (funcall (cdr decorator)))
+          my/hook-decorators))
+
+  (my:define-hook-decorator prog-mode)
+  (my:define-hook-decorator org-mode)
+
+  (use-package emacs
+    :hook
+    (after-init . my:inject-hook-decorators))
 #+end_src
 
 * UI
@@ -283,53 +307,110 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
   (use-package whitespace :diminish (whitespace-mode . "  "))
 #+end_src
 
-** color theme
-The theme package of doomacs is good.
+** modeline
+~doom-modeline~ is the coolest one. However, doom modeline's framework seems to be too heavy for me. So, finally I decided to create a simpler modeline only for koishimacs, named ~violet-line~ for it is colored purple.
 
 #+begin_src emacs-lisp
-  (use-package doom-themes
-    :ensure t
-    :when my/load-gui-config-p
-    :custom
-    (doom-themes-enable-bold t)
-    (doom-themes-enable-italic t)
-    :hook
-    ;; load it earilier to have a smooth startup
-    (after-init
-     . (lambda ()
-         (load-theme 'doom-zenburn t)
-         (doom-themes-visual-bell-config)
-         (doom-themes-org-config)))
+  ;; violet-line
+  (defvar violet-line-position
+    `(:propertize " %p/%I (%l:%c)"))
+  (put 'violet-line-position 'risky-local-variable t)
+
+  (defun violet-shrink-path (path &optional max-pixel-width)
+    (let ((max-pixel-width (or max-pixel-width 600)))
+      (if (< (string-pixel-width path) max-pixel-width)
+          path
+        (let* ((comp (file-name-split path))
+               (base (car (last comp)))
+               (dirs (cl-remove-if #'string-empty-p (butlast comp)))
+               (shrinked-dirs (mapconcat (lambda (dir)
+                                           (substring dir 0 1))
+                                         dirs "/"))
+               (shrinked-path (concat shrinked-dirs "/" base)))
+          (if (< (string-pixel-width shrinked-path) max-pixel-width)
+              shrinked-path
+            (if (< (string-pixel-width base) max-pixel-width)
+                base
+              (let* ((space-pixel-width (string-pixel-width " "))
+                     (len (floor (/ max-pixel-width space-pixel-width))))
+                (if (> len 0)
+                    (concat (substring base 0 len) "...")
+                  ""))))))))
+
+  (defvar-local violet-line-buffer-icon
+      `(:eval
+        (if-let ((s (buffer-file-name)))
+            (nerd-icons-icon-for-file s)
+          (nerd-icons-icon-for-buffer)))
     )
+  (put 'violet-line-buffer-icon 'risky-local-variable t)
+
+  (defvar-local violet-line-buffer-identification
+      `(:eval
+        (propertize
+         (let ((max-pixel-width
+                (- (window-pixel-width)
+                   (string-pixel-width
+                    (format-mode-line
+                     ;; do not cause recursion
+                     (delete 'mode-line-format-right-align
+                             (remove 'violet-line-buffer-identification
+                                     mode-line-format)))))))
+           (if-let ((s (buffer-file-name)))
+               (violet-shrink-path (abbreviate-file-name s) max-pixel-width)
+             (buffer-name)))
+         'face 'mode-line-buffer-id
+         'help-echo
+         (purecopy "Buffer name
+    mouse-1: Previous buffer\nmouse-3: Next buffer")
+         'mouse-face 'mode-line-highlight
+         'local-map mode-line-buffer-identification-keymap))
+    )
+  (put 'violet-line-buffer-identification 'risky-local-variable t)
+
+  ;; for right-aligned components
+  (setq mode-line-right-align-edge 'right-fringe)
+
+  ;; make use of native mode-line components defined in bindings.el
+  (setq-default mode-line-format
+                `("%e"
+                  mode-line-front-space
+                  mode-line-mule-info
+                  mode-line-client
+                  mode-line-modified
+                  mode-line-remote
+                  mode-line-window-dedicated
+                  mode-line-frame-identification
+                  violet-line-buffer-icon
+                  violet-line-buffer-identification
+                  violet-line-position
+                  (project-mode-line project-mode-line-format)
+                  (vc-mode vc-mode)
+                  mode-line-format-right-align
+                  " "
+                  mode-line-modes
+                  mode-line-misc-info
+                  mode-line-end-spaces
+                  ))
 #+end_src
 
-** modeline
-~doom-modeline~ is the coolest one. However, it is not compatible with
-many other cool things.
+Other useful components:
 
 #+begin_src emacs-lisp
-  (use-package doom-modeline
-    :ensure t
-    :when my/load-gui-config-p
-    :custom
-    (doom-modeline-minor-modes t)
-    :hook
-    ;; load it earilier to have a smooth startup
-    (after-init . doom-modeline-mode)
-    )
-
   (use-package hide-mode-line
     :ensure t
     :bind
     ("M-M" . hide-mode-line-mode)
     )
 
-  ;; currently, keycast-mode-line-mode is not compatible with doom-modeline
-  ;; but other keycast modes are still useful
   (use-package keycast
     :ensure t
+    :custom-face
+    (keycast-key ((t (:inherit (mode-line) :box (:line-width 2 :color "#C0A363" :style released-button)))))
     :custom
-    (keycast-mode-line-insert-after '(:eval (doom-modeline-format--main)))
+    (keycast-mode-line-format "%1s%k%r")
+    (keycast-mode-line-remove-tail-elements nil)
+    (keycast-mode-line-insert-after 'mode-line-modes)
     )
 #+end_src
 
@@ -388,9 +469,10 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
             (org-roam-node buffer indexed)
             ))
     (vertico-multiform-mode)
+
     :bind
     (:map vertico-map
-          ("?" . embark-bindings)
+          ("C-h" . embark-bindings)     ;; do not override '?'
           ("TAB" . minibuffer-complete) ;; orig: vertico-insert
           ("C-<tab>" . vertico-insert)
           ("C-'" . vertico-quick-jump)
@@ -511,7 +593,6 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
            ("C-x p b" . consult-project-buffer)      ;; orig. project-switch-to-buffer
            ;; Other custom bindings
            ("M-y" . consult-yank-pop)                ;; orig. yank-pop
-           ("C-s" . consult-line)                    ;; orig. isearch-forward
            ;; M-g bindings in `goto-map'
            ("M-g e" . consult-compile-error)
            ("M-g g" . consult-goto-line)             ;; orig. goto-line
@@ -531,7 +612,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
            ("M-s L" . consult-line-multi)
            ("M-s k" . consult-keep-lines)
            ("M-s u" . consult-focus-lines)
-           ("M-s s" . isearch-forward)
+           ("M-s s" . consult-line)
            ;; Isearch integration
            ("M-s e" . consult-isearch-history)
            :map isearch-mode-map
@@ -718,6 +799,15 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
       (popwin:popup-buffer
        (popwin:get-buffer "*Ibuffer*" :create))
       (ibuffer))
+
+    (defun ibuffer-oboe-absorb ()
+      "Absorb marked buffers into an OBOE temporary buffer."
+      (interactive)
+      (oboe-absorb (ibuffer-get-marked-buffers)))
+
+    :bind
+    (:map ibuffer-mode-map
+          ("a" . ibuffer-oboe-absorb))
     )
 
   (use-package register-list
@@ -750,7 +840,6 @@ Dired is powerful but rough, dirvish polished it.
   (use-package dirvish
     :ensure t
     :init
-    (require 'server)
     (dirvish-override-dired-mode)
     :custom
     (dirvish-attributes
@@ -759,11 +848,12 @@ Dired is powerful but rough, dirvish polished it.
     (("C-S-e" . dirvish-side)
      :map dirvish-mode-map
           ;; <tab> always translates to TAB by default
-          ("TAB" . dirvish-subtree-toggle)
           ;; but C-<tab> won't translate to C-TAB
-          ("C-<tab>" . dirvish-layout-toggle)
+          ("TAB" . dirvish-subtree-toggle)
+          ("`" . dirvish-layout-toggle)
           ("<" . dirvish-history-last)
           (">" . dirvish-history-jump)
+          ("?" . dirvish-dispatch)
           ("/" . dirvish-fd)
           )
     )
@@ -931,6 +1021,19 @@ solve the problem, we can only set specific font face when width
 alignment is needed.
 
 #+begin_src emacs-lisp
+  (use-package koishi-theme
+    :vc (:url "https://github.com/gynamics/koishi-theme.el")
+    :init
+    ;; load a sweet color theme
+    ;; currently koishi-theme is not suit for 8-color terminal
+    (when (or (daemonp)
+              (>= (display-color-cells) 256))
+      (load-theme 'koishi))
+    ;; background transparency in TUI mode
+    (unless my/load-gui-config-p
+      (setf (alist-get 'background-color default-frame-alist) nil))
+    )
+
   (defvar my/fontset-config
     '((t 'han "LXGW Wenkai Mono")
       (t 'kana "LXGW Wenkai Mono")
@@ -945,10 +1048,13 @@ alignment is needed.
         (error (message "failed to apply set-fontset-font to %S" conf)))))
 
   (when my/load-gui-config-p
+    ;; setup fontset
     (my:setup-default-fontset my/fontset-config)
     ;; set font faces
     (custom-set-faces
-     '(fixed-pitch-serif ((t (:weight bold :family "DejaVu Sans Mono"))))
+     '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 130 :width normal))))
+     '(fixed-pitch-serif ((t (:family "DejaVu Sans Mono" :weight bold))))
+     '(variable-pitch    ((t (:family "DejaVu Serif"))))
      )
     ;; set default frame title
     (setq-default frame-title-format
@@ -989,6 +1095,9 @@ Setup for server edit: always create a new frame, delete frame when done.
 
     (custom-set-variables '(server-kill-new-buffers t))
     (global-set-key (kbd "C-x C-c") (kbd "C-x # C-x 5 0"))
+    ;; resize initial window
+    (add-to-list 'default-frame-alist '(width . 100))
+    (add-to-list 'default-frame-alist '(height . 45))
     )
 #+end_src
 
@@ -1077,7 +1186,7 @@ More previews and visual feedback.
   (use-package visual-fill-column
     :ensure t
     :bind
-    ("C-c M-q" . visual-fill-column-mode)
+    ("C-c v c" . visual-fill-column-mode)
     )
 
   ;; view large file
@@ -1097,7 +1206,7 @@ More previews and visual feedback.
   (use-package yasnippet
     :ensure t
     :diminish (yas-minor-mode . " 󰰳")
-    :hook ((org-mode prog-mode) . yas-minor-mode)
+    :hook ((my/org-mode my/prog-mode) . yas-minor-mode)
     :defines yas-minor-mode-map
     )
 
@@ -1185,7 +1294,7 @@ Less is more.
     ("M-)" . sp-rewrap-sexp)   ;; (a b) -> [a b]
     ("M-W" . sp-copy-sexp)
     :hook
-    (prog-mode . smartparens-mode)
+    (my/prog-mode . smartparens-mode)
     )
 
 #+end_src
@@ -1229,7 +1338,7 @@ Edit text as structural data.
   (use-package hideshow
     :ensure t
     :diminish (hs-minor-mode . " 󰮕")
-    :hook (prog-mode . hs-minor-mode)
+    :hook (my/prog-mode . hs-minor-mode)
     )
 
 #+end_src
@@ -1264,12 +1373,18 @@ By default ~company~ uses overlay for display completion options, which has a se
               company-active-map
               company-prefix-map
               company-backends
+              company-lighter-base
               )
-    :init
-    (defun my:add-grouped-company-backend (backends)
-      (add-to-list 'company-backends
-                   (append backends
-                           '(:with company-yasnippet company-dabbrev-code))))
+    :preface
+    (defun my:add-grouped-company-backends (backends)
+      (with-eval-after-load 'company
+        (add-to-list
+         (if (and (boundp 'company-fuzzy-mode)
+                  company-fuzzy-mode)
+             'company-fuzzy--backends
+           'company-backends)
+         (append backends
+                 '(:with company-yasnippet company-dabbrev-code)))))
     :config
     ;; currently there is some problems with loading company-capf
     (require 'company-capf)
@@ -1299,11 +1414,26 @@ By default ~company~ uses overlay for display completion options, which has a se
           ("TAB" . company-begin-backend)
           )
     :hook
-    (prog-mode . company-mode)
+    (my/prog-mode . company-mode)
     (emacs-lisp-mode
-     . (lambda () (my:add-grouped-company-backend '(company-capf))))
+     . (lambda ()
+         (my:add-grouped-company-backends '(company-capf))))
     ((c-mode c++-mode)
-     . (lambda () (my:add-grouped-company-backend '(company-clang company-semantic))))
+     . (lambda ()
+         (my:add-grouped-company-backends '(company-clang company-semantic))))
+    )
+
+  (use-package liquidmetal :ensure t)
+  (use-package company-fuzzy
+    :ensure t
+    :diminish (company-fuzzy-mode . "")
+    :defines (company-fuzzy-mode
+              company-fuzzy--backends)
+    :custom
+    (company-fuzzy-sorting-backend 'liquidmetal)
+    :config
+    (customize-set-value 'company-lighter-base "󱓐")
+    :hook (company-mode . company-fuzzy-mode)
     )
 
   (use-package company-quickhelp
@@ -1321,7 +1451,8 @@ By default ~company~ uses overlay for display completion options, which has a se
 
   (use-package company-coq
     :ensure t
-    :diminish (company-coq-mode . " 󰐱[coq]")
+    :diminish
+    (company-coq-mode . (concat " " company-lighter-base "[Coq]"))
     :hook (coq-mode . company-coq-mode)
     )
 
@@ -1389,7 +1520,7 @@ They are FANTASTIC!!!
   (use-package dimmer
     :ensure t
     :when my/load-gui-config-p
-    :hook (prog-mode . dimmer-mode)
+    :hook (my/prog-mode . dimmer-mode)
     )
 
   (use-package fancy-compilation
@@ -1403,6 +1534,7 @@ They are FANTASTIC!!!
     :ensure t
     :config
     (require 'indent-bars-ts)           ; not needed with straight
+    (advice-add 'c-set-style :after 'indent-bars-reset)
     :custom
     (indent-bars-no-descend-lists t) ; no extra bars in continued func arg lists
     (indent-bars-treesit-support t)
@@ -1416,7 +1548,7 @@ They are FANTASTIC!!!
     ;;				      list list_comprehension
     ;;				      dictionary dictionary_comprehension
     ;;				      parenthesized_expression subscript)))
-    :hook (prog-mode . indent-bars-mode)
+    :hook (my/prog-mode . indent-bars-mode)
     )
 
   (use-package highlight-parentheses
@@ -1424,12 +1556,12 @@ They are FANTASTIC!!!
     :diminish (highlight-parentheses-mode . " 󰵪")
     :custom (highlight-parentheses-colors
              '("cyan" "yellow" "magenta" "red" "green" "blue"))
-    :hook (prog-mode . highlight-parentheses-mode)
+    :hook (my/prog-mode . highlight-parentheses-mode)
     )
 
   (use-package highlight-escape-sequences
     :ensure t
-    :hook (prog-mode . hes-mode)
+    :hook (my/prog-mode . hes-mode)
     )
 
   (use-package highlight-doxygen
@@ -1452,9 +1584,10 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 #+begin_src emacs-lisp
   (use-package flycheck
     :ensure t
-    :diminish (flycheck-mode . " 󱖉")
+    :custom
+    (flycheck-mode-line-prefix "󱖉")
     :hook
-    (prog-mode . flycheck-mode)
+    (my/prog-mode . flycheck-mode)
     (emacs-lisp-mode
      . (lambda ()
          (when (member (buffer-name)
@@ -1750,15 +1883,17 @@ Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++
                           (or (getenv "CPPFLAGS") "-DDEBUG=9")
                           (or (getenv "CFLAGS") "-Wall -g")
                           file))
-             (set (make-local-variable 'gud-gdb-command-name)
-                  (format "gdb -i=mi %s"
+             (set (make-local-variable 'gud-gud-gdb-command-name)
+                  (format "gdb --fullname %s"
                           (file-name-sans-extension file)))
              ))))
     :bind
     (:map c-mode-map
           ("C-c C-r" . compile)
-          ("C-c C-d" . gdb))
+          ("C-c C-d" . gud-gdb))
     )
+
+  (use-package gud :diminish (gud-mode . " "))
 #+end_src
 
 ** debugger
@@ -1935,6 +2070,9 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-babel-load-languages '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t)))
     (org-export-backends '(ascii html latex man md odt texinfo))
     (org-export-with-sub-superscripts nil)
+    (org-fontify-inline-src-blocks t)
+    (org-fontify-todo-headline t)
+    (org-fontify-quote-and-verse-blocks t)
     (org-fontify-whole-block-delimiter-line t)
     (org-fontify-whole-heading-line t)
     (org-format-latex-options '(:foreground default :background "Transparent" :scale 1.0 :html-foreground auto :html-background "Transparent" :html-scale 1.0 :matchers ("begin" "$1" "$" "$$" "\\(" "\\[")))
@@ -1945,7 +2083,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-image-actual-width nil)
     (org-latex-compiler "xelatex")
     (org-latex-listings 'minted)
-    (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz")))
+    (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz") ("" "amsfonts") ("" "amsmath")))
     (org-latex-pdf-process
      '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
        "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
@@ -1957,7 +2095,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-startup-folded 'content)
     (org-startup-with-inline-images my/load-gui-config-p)
     (org-todo-keywords '((sequence "PEND" "TODO" "DONE")))
-    (org-todo-keyword-faces '(("PEND" . (:foreground "#F0DFAF" :weight bold))))
+    (org-todo-keyword-faces '(("PEND" . (:foreground "#7FAFF0" :weight bold))))
     (org-use-sub-superscripts nil)
     :config
     ;; pdflatex is not very efficient, but only pdflatex supports tikz
@@ -1977,6 +2115,27 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 
     (setq org-preview-latex-default-process 'magick)
 
+    ;; patch for org-9.7.* to display transparent png image.
+    ;; it seems there is an Emacs bug to display transparency.
+    (when (<= (string-to-number org-version) 9.7)
+      (defun my:org--make-preview-overlay (beg end image &optional imagetype)
+        "Build an overlay between BEG and END using IMAGE file.
+   Argument IMAGETYPE is the extension of the displayed image,
+   as a string.  It defaults to \"png\"."
+        (let ((ov (make-overlay beg end))
+              (imagetype (or (intern imagetype) 'png)))
+          (overlay-put ov 'org-overlay-type 'org-latex-overlay)
+          (overlay-put ov 'evaporate t)
+          (overlay-put ov
+                       'modification-hooks
+                       (list (lambda (o _flag _beg _end &optional _l)
+                               (delete-overlay o))))
+          (overlay-put ov
+                       'display
+                       (list 'image :type imagetype :file image :ascent 'center :mask 'heuristic))))
+
+      (advice-add 'org--make-preview-overlay :override #'my:org--make-preview-overlay))
+
     (mapc
      (lambda (kv)
        (setf (alist-get (car kv) org-src-lang-modes) (cdr kv)))
@@ -1989,6 +2148,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
       (interactive)
       (set-variable 'org-hide-emphasis-markers (not org-hide-emphasis-markers))
       (org-restart-font-lock))
+
     :bind
     (("C-c a" . org-agenda)
      ("C-c c" . org-capture)
@@ -2004,7 +2164,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 
   (use-package simple
     :diminish (visual-line-mode . " 󰴐")
-    :hook (org-mode . visual-line-mode)
+    :hook (my/org-mode . visual-line-mode)
     :bind
     ("C-c v l" . visual-line-mode)
     )
@@ -2022,7 +2182,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-appear-autolinks t)
     (org-appear-autosubmarkers t)
     (org-appear-inside-latex t)
-    :hook (org-mode . org-appear-mode)
+    :hook (my/org-mode . org-appear-mode)
     )
 
   (use-package org-fragtog
@@ -2030,12 +2190,12 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :when my/load-gui-config-p
     :custom
     (org-fragtog-ignore-predicates '(org-at-block-p))
-    :hook (org-mode . org-fragtog-mode)
+    :hook (my/org-mode . org-fragtog-mode)
     )
 
   (use-package org-edit-indirect
     :ensure t
-    :hook (org-mode . org-edit-indirect-mode)
+    :hook (my/org-mode . org-edit-indirect-mode)
     )
 
   (use-package org-download
@@ -2058,14 +2218,14 @@ It is really interesting to write ~org-mode~ configurations in an org document.
           ("s" . org-download-screenshot)
           ("y" . org-download-yank)
           )
-    :hook (org-mode . org-download-enable)
+    :hook (my/org-mode . org-download-enable)
     )
 
   (use-package valign
     :ensure t
     :diminish (valign-mode . " 󰉠")
     :when my/load-gui-config-p
-    :hook ((org-mode markdown-mode) . valign-mode)
+    :hook ((my/org-mode markdown-mode) . valign-mode)
     )
 
   (use-package citar
@@ -2077,7 +2237,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (citar-bibliography (when my/citar-bib-directory
                           (directory-files my/citar-bib-directory t ".*\\.bib")))
     :hook
-    ((org-mode LaTeX-mode). citar-capf-setup)
+    ((my/org-mode LaTeX-mode). citar-capf-setup)
     )
 
   ;; embark integration
@@ -2107,16 +2267,14 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 Roam builds a note database by inserting a unique ID to your org notes.
 
 #+begin_src emacs-lisp
-  (use-package emacsql :ensure t)
   (use-package org-roam
     :ensure t
     :defines org-roam-cmd-map
     :after org
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
-    (org-roam-database-connector 'sqlite-builtin)
     (org-roam-dailies-directory "dailies/")
-    (org-roam-db-location (my:weak-path (file-name-concat org-roam-directory "org-roam.db")))
+    (org-roam-db-location (file-name-concat org-roam-directory "org-roam.db"))
     ;; Use FILE-TRUENAME to avoid expansion on this directory
     (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
     (org-roam-node-display-template
@@ -2171,7 +2329,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :diminish org-roam-timestamps-mode
     :ensure t
     :after org-roam
-    :hook (org-mode . org-roam-timestamps-mode)
+    :hook (my/org-mode . org-roam-timestamps-mode)
     )
 #+end_src
 
@@ -2196,15 +2354,6 @@ These applications are actually desktop-level, BTW I use Emacs.
        "https://xkcd.com/rss.xml"
        )
      )
-    )
-
-  (use-package emms
-    :ensure t
-    :commands (emms)
-    :config
-    (require 'emms-setup)
-    (emms-all)
-    (emms-default-players)
     )
 
   (use-package plz :ensure t)
@@ -2300,10 +2449,10 @@ Tools for Emacs development.
 
 * Epilogue
 ** miscellaneous utilities
-My own packages, you can get them from github with ~el-get~.
+My own packages, you can get them from github with ~vc-use-package~.
 #+begin_src emacs-lisp
   (use-package my-misc
-    :el-get gynamics/my-misc.el
+    :vc (:url "https://github.com/gynamics/my-misc.el")
     :bind
     ("M-Q"   . my:unfill-paragraph)
     ("C-x %" . my:eval-and-replace)
@@ -2312,15 +2461,22 @@ My own packages, you can get them from github with ~el-get~.
     )
 
   (use-package semantic-pkg-config
-    :el-get gynamics/semantic-pkg-config.el
+    :vc (:url "https://github.com/gynamics/semantic-pkg-config.el")
     )
 
+  ;; currently power-mode is broken with vertico
   (use-package railgun
-    :el-get gynamics/railgun.el
+    :vc (:url "https://github.com/gynamics/railgun.el")
     )
 
   (use-package toc-glue
-    :el-get gynamics/toc-glue.el
+    :vc (:url "https://github.com/gynamics/toc-glue.el")
+    )
+
+  (use-package oboe
+    :vc (:url "https://github.com/gynamics/oboe.el")
+    :custom
+    (oboe-default-display-method 'popwin:popup-buffer)
     )
 #+end_src
 
@@ -2330,6 +2486,8 @@ My own packages, you can get them from github with ~el-get~.
   (use-package recentf
     :init
     (recentf-mode)
+    :custom
+    (recentf-max-saved-items 64)
     :config
     ;; do not waste time on checking remote files
     (add-to-list 'recentf-keep 'file-remote-p)
@@ -2374,9 +2532,9 @@ My own packages, you can get them from github with ~el-get~.
 
   (use-package prog-mode
     :hook
-    (prog-mode . prettify-symbols-mode)
-    (prog-mode . display-line-numbers-mode)
-    (prog-mode . cleanup-whitespaces-on-save)
+    (my/prog-mode . prettify-symbols-mode)
+    (my/prog-mode . display-line-numbers-mode)
+    (my/prog-mode . cleanup-whitespaces-on-save)
     )
 
   ;; enable some disabled functions
@@ -2393,7 +2551,7 @@ to the emacsclient. Just assume that clients are all graphic frames.
     (xterm-mouse-mode))
 
   (defvar arrow-keys-map (make-sparse-keymap)
-    "Keymap for arrow keys")
+    "Keymap for arrow keys.")
 
   (bind-keys
    :map arrow-keys-map
