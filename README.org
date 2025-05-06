@@ -13,20 +13,21 @@ Read [[file:koishimacs.org::*preface][koishimacs.org:Prelude:preface]] if you ar
 
 GUI dashboard
 
-[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMGZ4fNu_3PydCHqYmyVqXHTN70XCgAAtDBMRvMAUBU0HqKeU4-POUBAAMCAAN3AAM2BA.png]]
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMNaBpF1ZkwBGbC9Czc3yBzNbo8lU0AAj_AMRvXj9lUIjE9opM4LMcBAAMCAAN3AAM2BA.png]]
 
 TUI
 
-[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMHZ4fNySjANoZf1-nEGd2QuffpSZAAAtHBMRvMAUBUMBwueyZd_GsBAAMCAAN5AAM2BA.png]]
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMOaBpF6plqDr-UCiaglzw2ILFYuqkAAkDAMRvXj9lU22yJd5OBDwcBAAMCAAN5AAM2BA.png]]
 
 * Features
 - A sweet logo (handdrawn, original character by /Team Shanghai Alice/)
+- A sweet theme ([[https://github.com/gynamics/koishi-theme.el][koishi-theme]] designed by gynamics)
 - A minimal literate startup framework, all in one org document.
 - Quick deployment (see [[*Bootstrap][Bootstrap]]).
 - Use both ~package.el~ and ~el-get.el~ for package fetching.
 - Out of the box as a powerful text editor, IDE or org editor.
 - Comes with unicode font GUI configuration (especially Chinese).
-- Starts up fast, GUI starts up in no more than 2 second on a modern machine.
+- Starts up fast, GUI starts up in no more than 2 seconds on a modern machine.
 - Even faster in terminal.
 - Configured as a multi-frame editor when working in daemon mode.
 
