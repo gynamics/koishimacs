@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2025-04-27 Sun>
+#+date: <2025-06-20 Fri>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.6.0
+  ;; Version: 5.7.0
 
   ;;; Commentary:
 
@@ -137,9 +137,20 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
 #+end_src
 
 ** package manager
-As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~. First we should pick up a fast ELPA mirror for ~package.el~ :
+As for package configuration, we will use ~use-package.el~, which provides convenient syntactic sugar macros. ~use-package~ is the built-in package management framework for emacs29+ and can get packages from package sources automatically with ~package.el~ with keyword ~:ensure~.
 
 #+begin_src emacs-lisp
+  ;; detect native-compile feature
+  (if (and (featurep 'native-compile)
+           (fboundp 'native-comp-available-p)
+           (native-comp-available-p))
+      ;; Activate `native-compile'
+      (setq native-comp-deferred-compilation t
+            package-native-compile t)
+    ;; Deactivate the `native-compile' feature if it is not available
+    (setq features (delq 'native-compile features)))
+
+  ;; pick up a fast ELPA mirror for package.el
   (custom-set-variables
    '(package-archives
      '(;; GNU ELPA (default)
@@ -161,21 +172,42 @@ To accelerate emacs startup we can do:
 2. lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
 
 #+begin_src emacs-lisp
+  (defvar use-package-selected-packages '(use-package)
+    "Packages pulled in by use-package.")
+
+  (defvar use-package-vc-selected-packages '()
+    "Packages pulled in by use-package-vc.")
+
   (use-package use-package
-    :demand t
+    :defer nil
     :custom
     (use-package-always-defer t)
     (use-package-vc-prefer-newest t)
     ;; set up this to get package loading statistics
     (use-package-compute-statistics t)
+    :preface
+    (define-advice use-package-handler/:ensure
+        (:around (fn name keyword args rest state))
+      (dolist (ensure args)
+        (let ((package
+               (or (and (eq ensure t)
+                        (use-package-as-symbol name))
+                   ensure)))
+          (when package
+            (when (consp package)
+              (setq package (car package)))
+            (add-to-list 'use-package-selected-packages package))))
+      (funcall fn name keyword args rest state))
+
+    (define-advice use-package-handler/:vc
+        (:around (fn name keyword args rest state))
+      (add-to-list 'use-package-vc-selected-packages
+                   (use-package-as-symbol name))
+      (funcall fn name keyword args rest state))
     )
 
   ;; involve this to make use-package find personal-keybindings on compiling
   ;; (use-package bind-key :demand t)
-  (use-package diminish
-    :ensure t
-    :when (find-font (font-spec :name "Symbols Nerd Font Mono"))
-    )
 #+end_src
 
 Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
@@ -183,8 +215,6 @@ Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file
 BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
 
 #+begin_src emacs-lisp
-  (use-package org :demand t)
-
   (defun my:regenerate-koishimacs-config (byte-compile-p)
     "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
   If BYTE-COMPILE-P is given as t, byte compile it."
@@ -207,11 +237,10 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
 #+begin_src emacs-lisp
   (use-package async
     :ensure t
-    :demand t
     :autoload (async-byte-recompile-directory)
     :custom
     (async-bytecomp-package-p t)
-    :init
+    :preface
     (defun my:byte-compile-subdirs-async (dir)
       "Byte compile all subdirectories under DIR asynchronously."
       (interactive "DPath of parent directory: ")
@@ -230,46 +259,44 @@ Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may b
   (defvar my/hook-decorators nil
     "A alist of hook decorators, items in (HOOK-NAME . LOADER).")
 
-  (defmacro my:define-hook-decorator (mode &optional loader)
-    "Define a hook decorator for given name MODE."
+  (defun my:define-hook-decorator (mode &optional loader)
+    "Define a hook decorator for given name MODE.
+  You may provide a customized LOADER for loading my/MODE-hook."
     (unless (symbolp mode)
       (error "%s is not a symbol!" mode))
-    `(let ((decorator
-            ',(intern (concat "my/" (symbol-name mode) "-hook")))
-           (docstring
-            ,(concat "Hook decorator for `" (symbol-name mode) "'.")))
-       ;; define a variable for it using `defvar'
-       (eval `(defvar ,decorator nil ,docstring))
-       (let* ((orig
-               ',(intern (concat (symbol-name mode) "-hook"))))
-         ;; set a loader for that hook decorator
-         (setf (alist-get decorator my/hook-decorators)
-               (if (and ,loader (functionp ,loader))
-                   ,loader
-                 (lambda ()
-                   (with-eval-after-load ',mode
-                     (eval `(setf ,orig
-                                  (nconc ,orig ,decorator))))))))))
+    (let ((decorator
+           (intern (concat "my/" (symbol-name mode) "-hook")))
+          (docstring
+           (concat "Hook decorator for `" (symbol-name mode) "'.")))
+      ;; define a variable for it using `defvar'
+      (eval `(defvar ,decorator nil ,docstring))
+      (let ((orig
+             (intern (concat (symbol-name mode) "-hook"))))
+        ;; set a loader for that hook decorator
+        (setf (alist-get decorator my/hook-decorators)
+              (if (and loader (functionp loader))
+                  loader
+                (lambda ()
+                  (add-to-list orig (lambda () (run-hooks decorator)))))))))
 
   (defun my:inject-hook-decorators ()
     "Inject hook decorators to those hooks to be decorated."
     (mapc (lambda (decorator) (funcall (cdr decorator)))
           my/hook-decorators))
 
-  (my:define-hook-decorator prog-mode)
-  (my:define-hook-decorator org-mode)
+  (my:define-hook-decorator 'prog-mode)
+  (my:define-hook-decorator
+   'org-mode
+   (lambda ()
+     (with-eval-after-load 'org
+       (add-hook 'org-mode-hook (lambda () (run-hooks 'my/org-mode-hook))))))
 
-  (use-package emacs
-    :hook
-    (after-init . my:inject-hook-decorators))
+  (add-hook 'after-init-hook #'my:inject-hook-decorators)
 #+end_src
 
 * UI
 ** nongui startup
-With this predicate, we can avoid loading something packages that may
-cause problems in terminal. However, the client configuration depends
-on the daemon. To make clients available for GUI, the daemon has to be
-excluded. Unfortunately, we still can not set this in ~early-init.el~
+With this predicate, we can avoid loading something packages that may cause problems in terminal. However, the client configuration depends on the daemon. To make clients available for GUI, the daemon has to be excluded. Unfortunately, we still can not set this in ~early-init.el~
 
 #+begin_src emacs-lisp
   (defvar my/load-gui-config-p
@@ -280,15 +307,44 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
 ~nerd-icons~ provides a basic recipe, and ~diminish~ beautifies the modeline.
 
 #+begin_src emacs-lisp
+  (defvar my/be-iconic-p (char-displayable-p ?))
+
+  (use-package use-package
+    :preface
+    (define-advice use-package-handler/:diminish
+        (:override (name _keyword arg rest state))
+      (let ((body (use-package-process-keywords name rest state)))
+        (use-package-concat
+         (when my/be-iconic-p
+           (mapcar #'(lambda (var)
+                       `(if (fboundp 'diminish)
+                            ,(if (consp var)
+                                 `(diminish ',(car var) ,(cdr var))
+                               `(diminish ',var))))
+                   arg))
+         body))
+      )
+    )
+
+  (use-package diminish
+    :ensure t
+    :when my/be-iconic-p
+    :commands (diminish)
+    :config
+    (diminish 'abbrev-mode "  ")
+    (diminish 'auto-revert-mode "  ")
+    (diminish 'whitespace-mode "  ")
+    )
+
   (use-package nerd-icons
     :ensure t
-    :demand t
-    :when my/load-gui-config-p
+    :defer nil
+    :when my/be-iconic-p
     )
 
   (use-package nerd-icons-completion
     :ensure t
-    :when my/load-gui-config-p
+    :when my/be-iconic-p
     :config
     (nerd-icons-completion-mode)
     :hook
@@ -297,14 +353,9 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
 
   (use-package nerd-icons-ibuffer
     :ensure t
-    :when my/load-gui-config-p
+    :when my/be-iconic-p
     :hook (ibuffer-mode . nerd-icons-ibuffer-mode)
     )
-
-  ;; config diminish for some built-in packages
-  (use-package abbrev :diminish (abbrev-mode . "  "))
-  (use-package autorevert :diminish (auto-revert-mode . "  "))
-  (use-package whitespace :diminish (whitespace-mode . "  "))
 #+end_src
 
 ** modeline
@@ -339,9 +390,10 @@ excluded. Unfortunately, we still can not set this in ~early-init.el~
 
   (defvar-local violet-line-buffer-icon
       `(:eval
-        (if-let ((s (buffer-file-name)))
-            (nerd-icons-icon-for-file s)
-          (nerd-icons-icon-for-buffer)))
+        (when my/be-iconic-p
+          (if-let ((s (buffer-file-name)))
+              (nerd-icons-icon-for-file s)
+            (nerd-icons-icon-for-buffer))))
     )
   (put 'violet-line-buffer-icon 'risky-local-variable t)
 
@@ -415,8 +467,7 @@ Other useful components:
 #+end_src
 
 ** completion
-Emacs use minibuffer for quick interactions, most interactions can be
-accelerated by a powerful completion framework.
+Emacs use minibuffer for quick interactions, most interactions can be accelerated by a powerful completion framework.
 
 - ~vertico~ provides a performant and minimalist vertical completion UI
 - ~consult~ provides search and navigation commands
@@ -429,7 +480,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
 #+begin_src emacs-lisp
   (use-package orderless
     :ensure t
-    :demand t
+    :defer nil
     :config
     (orderless-define-completion-style orderless+initialism
       (orderless-matching-styles '(orderless-initialism orderless-literal orderless-regexp)))
@@ -442,7 +493,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
             (variable (styles orderless+initialism))
             (symbol (styles orderless+initialism))))
     :custom
-    (completion-styles '(orderless))
+    (completion-styles '(orderless basic substring partial-completion flex))
     (orderless-matching-styles '(orderless-literal orderless-regexp))
     )
 
@@ -497,14 +548,14 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :init
     ;; Add prompt indicator to `completing-read-multiple'.
     ;; We display [CRM<separator>], e.g., [CRM,] if the separator is a comma.
-    (defun crm-indicator (args)
+    (define-advice completing-read-multiple
+        (:filter-args (args) crm-indicator)
       (cons (format "[CRM%s] %s"
                     (replace-regexp-in-string
                      "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
                      crm-separator)
                     (car args))
             (cdr args)))
-    (advice-add #'completing-read-multiple :filter-args #'crm-indicator)
 
     ;; Do not allow the cursor in the minibuffer prompt
     (setq minibuffer-prompt-properties
@@ -612,11 +663,12 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
            ("M-s L" . consult-line-multi)
            ("M-s k" . consult-keep-lines)
            ("M-s u" . consult-focus-lines)
-           ("M-s s" . consult-line)
+           ("M-s s" . consult-line)                  ;; for less finger motion
            ;; Isearch integration
            ("M-s e" . consult-isearch-history)
            :map isearch-mode-map
            ("M-s e" . consult-isearch-history)       ;; orig. isearch-edit-string
+           ("M-s s" . consult-line)                  ;; for less finger motion
            ("M-s l" . consult-line)                  ;; needed by consult-line to detect isearch
            ("M-s L" . consult-line-multi)            ;; needed by consult-line to detect isearch
            )
@@ -668,9 +720,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
 #+end_src
 
 ** popwin
-Except for minibuffer, we usually use interactive buffers for more
-complicated interactions. Another solution may be introduced to manage
-all such buffers, e. g. vterm, ibuffer, message, etc.
+Except for minibuffer, we usually use interactive buffers for more complicated interactions. Another solution may be introduced to manage all such buffers, e. g. vterm, ibuffer, message, etc.
 
 ~popwin~ provides more agile workflows based on popup buffers.
 Related packages that provides auxiliary functions must be placed before it.
@@ -702,6 +752,9 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
            (popwin:stick-popup-window))))
 
     :init
+    ;; enable popwin mode
+    (popwin-mode)
+
     (defun my:popwin:scratch ()
       "Show *scratch* in a popwin, if not exist, create it."
       (interactive)
@@ -712,9 +765,6 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
       (interactive)
       (my:popwin:toggle "*scratch*"
                         (my:popwin:scratch)))
-
-    ;; enable popwin mode
-    (popwin-mode)
 
     :config
     ;; special display config
@@ -850,11 +900,12 @@ Dired is powerful but rough, dirvish polished it.
           ;; <tab> always translates to TAB by default
           ;; but C-<tab> won't translate to C-TAB
           ("TAB" . dirvish-subtree-toggle)
-          ("`" . dirvish-layout-toggle)
+          ("C-<tab>" . dirvish-layout-toggle)
           ("<" . dirvish-history-last)
           (">" . dirvish-history-jump)
           ("?" . dirvish-dispatch)
           ("/" . dirvish-fd)
+          ("e" . dirvish-emerge-menu)
           )
     )
 #+end_src
@@ -943,12 +994,13 @@ A big but useless thing.
   (use-package dashboard
     :ensure t
     :when (display-graphic-p)
-    :init
+    :preface
     ;; because these packages are placed later,
     ;; we have to specify these autoloads here.
-    (autoload 'org-agenda "org-agenda")
-    (autoload 'elfeed "elfeed")
-    (autoload 'emms "emms-playlist-mode")
+    (autoload #'org-agenda "org-agenda")
+    (autoload #'elfeed "elfeed")
+    (autoload #'gnus "gnus")
+    :init
     (dashboard-setup-startup-hook)
     :custom-face
     (dashboard-banner-logo-title ((t (:inherit italic :height 1.5 :family "Chopin Script"))))
@@ -957,13 +1009,16 @@ A big but useless thing.
     (dashboard-buffer-last-width 80)
     (dashboard-center-content    t)
     (dashboard-footer-messages
-     '("Everything will be all right under the hat of unconsciousness."
-       "Embrace a stinging mind, enjoy a thorny road."
-       "Miserable creatures are reasoned to be abominable."
-       "Din~ ko.ko.da.yo!"
-       "If I am born to be exiled, I would rather exile my fate."
+     '("Representation \"All Ancestors Standing Beside Your Bed\""
+       "Representation \"Danmaku Paranoia\""
        "Instinct \"Release of ID\""
        "Suppression \"Super Ego\""
+       "Response \"Youkai Polygraph\""
+       "Unconscious \"Rorschach in Danmaku\""
+       "Rekindled \"The Embers of Love\""
+       "Depths \"Genetics of the Unconscious\""
+       "Philosophy of the Despised"
+       "Subterranean Rose"
        )
      )
     (dashboard-image-banner-max-height 400)
@@ -988,8 +1043,8 @@ A big but useless thing.
         (" " "Elfeed" "Browse RSS Feeds"
          (lambda (&rest _) (elfeed))
          warning "[" "]")
-        ("󰫔 " "EMMS" "Emacs Multi-Media System"
-         (lambda (&rest _) (emms))
+        (" " "Gnus" "Browse News & Mails"
+         (lambda (&rest _) (gnus))
          warning "[" "]")
         (" " "Butterfly" "Real world programming!"
          (lambda (&rest _) (butterfly))
@@ -1009,16 +1064,13 @@ A big but useless thing.
           ("a" . org-agenda)
           ("b" . butterfly)
           ("f" . elfeed)
-          ("m" . emms)
+          ("n" . gnus)
           )
     )
 #+end_src
 
 ** gui
-Setup GUI. We can set the initial X window size and position. It is a
-pity that the han font can not be scaled once the size is fixed. To
-solve the problem, we can only set specific font face when width
-alignment is needed.
+Setup GUI. We can set the initial X window size and position. It is a pity that the han font can not be scaled once the size is fixed. To solve the problem, we can only set specific font face when width alignment is needed.
 
 #+begin_src emacs-lisp
   (use-package koishi-theme
@@ -1099,6 +1151,28 @@ Setup for server edit: always create a new frame, delete frame when done.
     (add-to-list 'default-frame-alist '(width . 100))
     (add-to-list 'default-frame-alist '(height . 45))
     )
+#+end_src
+
+** tui
+Terminal mode configuration, actually there are very little we can do to the emacsclient. Just assume that clients are all graphic frames.
+
+#+begin_src emacs-lisp
+  (unless my/load-gui-config-p
+    (xterm-mouse-mode))
+
+  (defvar arrow-keys-map (make-sparse-keymap)
+    "Keymap for arrow keys.")
+
+  (bind-keys
+   :map arrow-keys-map
+   ("A" [up])
+   ("B" [down])
+   ("C" [right])
+   ("D" [left]))
+  ;; arrow keys may be broken in some terminals,
+  ;; define a wrapper to translate ESC [ or ESC O
+  (define-key esc-map "[" arrow-keys-map)
+  (define-key esc-map "O" arrow-keys-map)
 #+end_src
 
 * Text Editor
@@ -1366,6 +1440,8 @@ Although there are many other code completion frontends today, ~company~ is stil
 
 By default ~company~ uses overlay for display completion options, which has a series of problems. These is a package ~company-box~ which uses child frames, but has some performance problems with documentation display. So, as a tradeoff, currently I don't use child frames and just stay with overlays.
 
+Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disable ~company-fuzzy-mode~ in ~coq-mode~.
+
 #+begin_src emacs-lisp
   (use-package company
     :ensure t
@@ -1379,8 +1455,7 @@ By default ~company~ uses overlay for display completion options, which has a se
     (defun my:add-grouped-company-backends (backends)
       (with-eval-after-load 'company
         (add-to-list
-         (if (and (boundp 'company-fuzzy-mode)
-                  company-fuzzy-mode)
+         (if (bound-and-true-p company-fuzzy-mode)
              'company-fuzzy--backends
            'company-backends)
          (append backends
@@ -1388,8 +1463,8 @@ By default ~company~ uses overlay for display completion options, which has a se
     :config
     ;; currently there is some problems with loading company-capf
     (require 'company-capf)
+    (when my/be-iconic-p (setq company-lighter-base "󰐱"))
     :custom
-    (company-lighter-base "󰐱")
     (company-transformers '(delete-consecutive-dups
                             company-sort-by-backend-importance
                             company-sort-prefer-same-case-prefix))
@@ -1432,8 +1507,12 @@ By default ~company~ uses overlay for display completion options, which has a se
     :custom
     (company-fuzzy-sorting-backend 'liquidmetal)
     :config
-    (customize-set-value 'company-lighter-base "󱓐")
-    :hook (company-mode . company-fuzzy-mode)
+    (when my/be-iconic-p (setq-local company-lighter-base "󱓚"))
+    :hook
+    (company-mode
+     . (lambda ()
+         (unless (bound-and-true-p company-coq-mode)
+           (company-fuzzy-mode))))
     )
 
   (use-package company-quickhelp
@@ -1452,8 +1531,15 @@ By default ~company~ uses overlay for display completion options, which has a se
   (use-package company-coq
     :ensure t
     :diminish
-    (company-coq-mode . (concat " " company-lighter-base "[Coq]"))
-    :hook (coq-mode . company-coq-mode)
+    (company-coq-mode . "")
+    :config
+    (when my/be-iconic-p (setq-local company-lighter-base "󱓘"))
+    :hook
+    (coq-mode
+     . (lambda ()
+         (when (bound-and-true-p company-fuzzy-mode)
+           (company-fuzzy-mode -1)
+           (company-coq-mode))))
     )
 
   (use-package company-maxima
@@ -1502,16 +1588,15 @@ They are FANTASTIC!!!
     :custom
     (color-identifiers-coloring-method 'hash)
     :hook
-    ((c-mode c++-mode java-mode js-mode python-mode rust-mode)
-     . color-identifiers-mode)
+    (my/prog-mode . color-identifiers-mode-maybe)
     )
 
   (use-package diff-hl
     :ensure t
     :when my/load-gui-config-p
     :diminish (diff-hl-mode . "  ")
-    :commands (diff-hl-mode
-               global-diff-hl-mode)
+    :commands (diff-hl-mode)
+    :custom (global-diff-hl-mode t)
     :hook
     (magit-pre-refresh  . diff-hl-magit-pre-refresh)
     (magit-post-refresh . diff-hl-magit-post-refresh)
@@ -1520,7 +1605,7 @@ They are FANTASTIC!!!
   (use-package dimmer
     :ensure t
     :when my/load-gui-config-p
-    :hook (my/prog-mode . dimmer-mode)
+    :custom (dimmer-mode t)
     )
 
   (use-package fancy-compilation
@@ -1564,11 +1649,6 @@ They are FANTASTIC!!!
     :hook (my/prog-mode . hes-mode)
     )
 
-  (use-package highlight-doxygen
-    :ensure t
-    :hook ((c-mode c++-mode java-mode) . highlight-doxygen-mode)
-    )
-
   (use-package rainbow-mode
     :ensure t
     :diminish (rainbow-mode . "  ")
@@ -1584,8 +1664,9 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 #+begin_src emacs-lisp
   (use-package flycheck
     :ensure t
-    :custom
-    (flycheck-mode-line-prefix "󱖉")
+    :config
+    (when my/be-iconic-p
+      (setq flycheck-mode-line-prefix "󱖉"))
     :hook
     (my/prog-mode . flycheck-mode)
     (emacs-lisp-mode
@@ -1767,6 +1848,7 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
 
   ;; We may enable some built-in treesit modes directly to be lazy
   (use-package treesit
+    :autoload (treesit-ready-p)
     :init
     (when (treesit-ready-p 'cmake t)
       (add-to-list 'auto-mode-alist
@@ -1909,6 +1991,10 @@ Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, and ~dape~ 
 Most of them are not configured and deferred.
 
 #+begin_src emacs-lisp
+  (use-package lilypond-mode
+    :mode ("\\.i?ly\\'" . LilyPond-mode)
+    )
+
   (use-package haskell-mode
     :ensure t
     :autoload (haskell-compile
@@ -2041,7 +2127,6 @@ Most of them are not configured and deferred.
   (use-package graphviz-dot-mode :ensure t)
   (use-package lua-mode :ensure t)
   (use-package maxima :ensure t)
-  (use-package nhexl-mode :ensure t)
   (use-package tuareg :ensure t)
   (use-package proof-general :ensure t)
   (use-package riscv-mode :ensure t)
@@ -2056,6 +2141,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 
 #+begin_src emacs-lisp
   (use-package org
+    :autoload (org-babel-tangle-file)
     :defines org-mode-map
     :custom-face
     (org-level-1 ((t (:inherit outline-1 :height 1.25))))
@@ -2067,7 +2153,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :custom
     (org-directory (my:weak-directory "/wsp/doc/org"))
     (org-agenda-files (list (my:strong-directory (file-name-concat org-directory "roam/agenda"))))
-    (org-babel-load-languages '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t)))
+    (org-modules '(ol-doi ol-w3m ol-bbdb ol-bibtex ol-docview ol-gnus ol-info ol-irc ol-mhe ol-rmail ol-eww))
     (org-export-backends '(ascii html latex man md odt texinfo))
     (org-export-with-sub-superscripts nil)
     (org-fontify-inline-src-blocks t)
@@ -2083,7 +2169,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-image-actual-width nil)
     (org-latex-compiler "xelatex")
     (org-latex-listings 'minted)
-    (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz") ("" "amsfonts") ("" "amsmath")))
+    (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz") ("" "amsfonts") ("" "amsmath") ("" "amsthm")))
     (org-latex-pdf-process
      '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
        "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
@@ -2115,13 +2201,18 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 
     (setq org-preview-latex-default-process 'magick)
 
+    ;; This must be deferred after `org-preview-latex-process-alist' is set
+    (setq org-babel-load-languages
+          '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t) (lilypond . t)))
+
     ;; patch for org-9.7.* to display transparent png image.
     ;; it seems there is an Emacs bug to display transparency.
     (when (<= (string-to-number org-version) 9.7)
-      (defun my:org--make-preview-overlay (beg end image &optional imagetype)
+      (define-advice org--make-preview-overlay
+          (:override (beg end image &optional imagetype))
         "Build an overlay between BEG and END using IMAGE file.
-   Argument IMAGETYPE is the extension of the displayed image,
-   as a string.  It defaults to \"png\"."
+     Argument IMAGETYPE is the extension of the displayed image,
+     as a string.  It defaults to \"png\"."
         (let ((ov (make-overlay beg end))
               (imagetype (or (intern imagetype) 'png)))
           (overlay-put ov 'org-overlay-type 'org-latex-overlay)
@@ -2133,15 +2224,15 @@ It is really interesting to write ~org-mode~ configurations in an org document.
           (overlay-put ov
                        'display
                        (list 'image :type imagetype :file image :ascent 'center :mask 'heuristic))))
-
-      (advice-add 'org--make-preview-overlay :override #'my:org--make-preview-overlay))
+      )
 
     (mapc
      (lambda (kv)
        (setf (alist-get (car kv) org-src-lang-modes) (cdr kv)))
      '(("haskell" . haskell-ts)
        ("python" . python-ts)
-       ("scheme" . scheme)))
+       ("scheme" . scheme)
+       ("lilypond" . LilyPond)))
 
     (defun org-toggle-emphasis-markers ()
       "Toggle visibility of emphasis markers in current buffer."
@@ -2270,7 +2361,6 @@ Roam builds a note database by inserting a unique ID to your org notes.
   (use-package org-roam
     :ensure t
     :defines org-roam-cmd-map
-    :after org
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
     (org-roam-dailies-directory "dailies/")
@@ -2317,7 +2407,8 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :diminish
     (org-roam-ui-mode . " 󱗿")
     (org-roam-ui-follow-mode . "  ")
-    :custom (org-roam-ui-open-on-start nil)
+    :custom
+    (org-roam-ui-open-on-start nil)
     :bind
     (:map org-roam-cmd-map
           ("u" . org-roam-ui-open)
@@ -2340,6 +2431,31 @@ There is a joke that Emacs is actually an operating system shell on lisp.
 These applications are actually desktop-level, BTW I use Emacs.
 
 #+begin_src emacs-lisp
+  (use-package message
+    :custom
+    (message-directory
+     (my:strong-directory (concat user-emacs-directory "Mail/")))
+    )
+
+  (use-package sendmail
+    :custom
+    (mail-default-directory
+     (my:strong-directory (concat user-emacs-directory "sendmail/")))
+    (mail-signature-file
+     (concat mail-default-directory ".signature"))
+    )
+
+  (use-package gnus
+    :custom
+    (gnus-home-directory
+     (my:strong-directory (concat user-emacs-directory "gnus/")))
+    (gnus-directory
+     (concat gnus-home-directory "News/"))
+    (mail-source-directory message-directory)
+    :config
+    (setq gnus-select-method '(nntp "news.gmane.io"))
+    )
+
   (use-package elfeed
     :ensure t
     :commands (elfeed)
@@ -2356,14 +2472,12 @@ These applications are actually desktop-level, BTW I use Emacs.
      )
     )
 
-  (use-package plz :ensure t)
   (use-package go-translate
     :ensure t
     :autoload (gt-start
                gt-taker
-               gt-translator
-               gt-plz-http-client)
-    :init
+               gt-translator)
+    :preface
     (defun my:gt-do-translate-quickly ()
       "Do a quick translate query with minibuffer prompt."
       (interactive)
@@ -2373,10 +2487,12 @@ These applications are actually desktop-level, BTW I use Emacs.
         :engines (gt-stardict-engine)
         :render (gt-render))))
 
-    :custom
-    (gt-default-http-client (gt-plz-http-client))
-    (gt-langs '(en zh))
-    (gt-preset-translators
+    :config
+    (setq
+     gt-http-backend (pdd-url-backend)
+     gt-http-proxy (or (getenv "http_proxy") (getenv "ALL_PROXY"))
+     gt-langs '(en zh)
+     gt-preset-translators
      `((ts-word
         . ,(gt-translator
             :taker (gt-taker)
@@ -2453,6 +2569,7 @@ My own packages, you can get them from github with ~vc-use-package~.
 #+begin_src emacs-lisp
   (use-package my-misc
     :vc (:url "https://github.com/gynamics/my-misc.el")
+    :defer nil
     :bind
     ("M-Q"   . my:unfill-paragraph)
     ("C-x %" . my:eval-and-replace)
@@ -2493,6 +2610,16 @@ My own packages, you can get them from github with ~vc-use-package~.
     (add-to-list 'recentf-keep 'file-remote-p)
     )
 
+  (use-package prog-mode
+    :hook
+    (my/prog-mode . prettify-symbols-mode)
+    (my/prog-mode . display-line-numbers-mode)
+    (my/prog-mode
+     . (lambda () ;; cleanup whitespaces on save.
+         (make-local-variable 'before-save-hook)
+         (add-hook 'before-save-hook ;; make it buffer-local
+                   #'(lambda () (whitespace-cleanup)) nil t)))
+    )
   ;; some general configurations
   (use-package emacs
     :custom
@@ -2523,46 +2650,15 @@ My own packages, you can get them from github with ~vc-use-package~.
     ("C-c v SPC" . whitespace-mode)
     )
 
-  ;; cleanup whitespaces on save
-  (defun cleanup-whitespaces-on-save ()
-    (make-local-variable 'before-save-hook)
-    (add-hook 'before-save-hook ;; make it buffer-local
-              #'(lambda () (whitespace-cleanup)) nil t)
-    )
-
-  (use-package prog-mode
-    :hook
-    (my/prog-mode . prettify-symbols-mode)
-    (my/prog-mode . display-line-numbers-mode)
-    (my/prog-mode . cleanup-whitespaces-on-save)
-    )
+  (setq package-selected-packages
+        (append use-package-selected-packages
+                use-package-vc-selected-packages))
+  (setq package-vc-selected-packages
+        use-package-vc-selected-packages)
 
   ;; enable some disabled functions
   (put 'downcase-region 'disabled nil) ;; C-x C-l
   (put 'upcase-region 'disabled nil)   ;; C-x C-u
-#+end_src
-
-** tui
-Terminal mode configuration, actually there are very little we can do
-to the emacsclient. Just assume that clients are all graphic frames.
-
-#+begin_src emacs-lisp
-  (unless my/load-gui-config-p
-    (xterm-mouse-mode))
-
-  (defvar arrow-keys-map (make-sparse-keymap)
-    "Keymap for arrow keys.")
-
-  (bind-keys
-   :map arrow-keys-map
-   ("A" [up])
-   ("B" [down])
-   ("C" [right])
-   ("D" [left]))
-  ;; arrow keys may be broken in some terminals,
-  ;; define a wrapper to translate ESC [ or ESC O
-  (define-key esc-map "[" arrow-keys-map)
-  (define-key esc-map "O" arrow-keys-map)
 #+end_src
 
 ** footer
@@ -2578,10 +2674,6 @@ Evaluate these expressions after bootstrap to complete the installation, never t
 #+begin_src emacs-lisp :tangle no
   ;; install font for `nerd-icons'
   (nerd-icons-install-fonts)
-
-  ;; install tabnine binary for `company-tabnine', for linux only x86_64 is supported.
-  ;; see https://docs.tabnine.com/main/welcome/readme/system-requirements#tabnine-client-ide-plugin
-  (company-tabnine-install-binary)
 
   ;; run this code once to install all treesit libraries at once (not necessary)
   (mapc #'treesit-install-language-grammar
