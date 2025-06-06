@@ -47,17 +47,17 @@
  ;; If there is more than one, they won't work right.
  '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 120 :width normal)))))
 
-;; Don't attempt to find/apply special file handlers to files loaded during startup.
-(let ((file-name-handler-alist nil)
-      (literate-config (concat user-emacs-directory "koishimacs.org"))
+(let ((literate-config (concat user-emacs-directory "koishimacs.org"))
       (code-config (concat user-emacs-directory "koishimacs.el")))
   (when (file-exists-p literate-config)
     ;; If config is pre-compiled and newer, then load it
     (if (and (file-exists-p code-config)
              (file-newer-than-file-p code-config literate-config))
         (load-file code-config)
+      ;; Otherwise use org-babel to tangle the literate configuration
       (progn
-        ;; Otherwise use org-babel to tangle the literate configuration
+        ;; do not load any org modules before tangling
+        (setq org-modules nil)
         (require 'org)
         (org-babel-load-file literate-config)))
     ))
