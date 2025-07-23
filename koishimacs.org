@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2025-06-20 Fri>
+#+date: <2025-07-21 Mon>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.7.0
+  ;; Version: 5.8.0
 
   ;;; Commentary:
 
@@ -80,24 +80,26 @@ There are several helpers help create or neglect missing files in initialization
 However, if we start a subprocess from emacs, it uses environment variables inherited from the parent process of Emacs, which provides ~initial-environment~. To change this, we should modify variable ~exec-path~.
 
 #+begin_src emacs-lisp
+  (require 'cl-lib)
+
   (defun my:add-to-env-path (additional-path-list)
     "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
     (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
       (dolist (path additional-path-list)
-        (add-to-list 'exec-path path-string))
+        (cl-pushnew path env-path-list))
       (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
 
   (defun my:add-to-exec-path (additional-path-list)
     "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
     (dolist (path additional-path-list)
-      (add-to-list 'exec-path path-string)))
+      (add-to-list 'exec-path path)))
 
   (defun my:add-to-path (additional-path-list)
     "Add path strings in ADDITIONAL-PATH-LIST to both $PATH and EXEC-PATH."
     (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
       (dolist (path additional-path-list)
         (add-to-list 'exec-path path)
-        (add-to-list 'env-path-list path))
+        (cl-pushnew path env-path-list))
       (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
 
   (defun my:strip-list (&rest args)
@@ -145,7 +147,7 @@ As for package configuration, we will use ~use-package.el~, which provides conve
            (fboundp 'native-comp-available-p)
            (native-comp-available-p))
       ;; Activate `native-compile'
-      (setq native-comp-deferred-compilation t
+      (setq native-comp-jit-compilation t
             package-native-compile t)
     ;; Deactivate the `native-compile' feature if it is not available
     (setq features (delq 'native-compile features)))
@@ -172,12 +174,6 @@ To accelerate emacs startup we can do:
 2. lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
 
 #+begin_src emacs-lisp
-  (defvar use-package-selected-packages '(use-package)
-    "Packages pulled in by use-package.")
-
-  (defvar use-package-vc-selected-packages '()
-    "Packages pulled in by use-package-vc.")
-
   (use-package use-package
     :defer nil
     :custom
@@ -186,6 +182,12 @@ To accelerate emacs startup we can do:
     ;; set up this to get package loading statistics
     (use-package-compute-statistics t)
     :preface
+    (defvar use-package-selected-packages '(use-package)
+      "Packages pulled in by use-package.")
+
+    (defvar use-package-vc-selected-packages '()
+      "Packages pulled in by use-package-vc.")
+
     (define-advice use-package-handler/:ensure
         (:around (fn name keyword args rest state))
       (dolist (ensure args)
@@ -252,16 +254,20 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
     )
 #+end_src
 
-** hook decorators
+** helpers
+This section contains some helper functions and macros.
+
 Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may break elisp bytecompile. So I decided to add decorators to such hooks to avoid direct binding to it.
 
 #+begin_src emacs-lisp
   (defvar my/hook-decorators nil
     "A alist of hook decorators, items in (HOOK-NAME . LOADER).")
 
-  (defun my:define-hook-decorator (mode &optional loader)
+  (defun my:define-hook-decorator (mode &optional file loader)
     "Define a hook decorator for given name MODE.
-  You may provide a customized LOADER for loading my/MODE-hook."
+  FILE is used for `with-eval-after-load' to ensure MODE is bound, default
+  value is MODE.  You may also provide a customized LOADER for loading
+  my/MODE-hook."
     (unless (symbolp mode)
       (error "%s is not a symbol!" mode))
     (let ((decorator
@@ -271,13 +277,15 @@ Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may b
       ;; define a variable for it using `defvar'
       (eval `(defvar ,decorator nil ,docstring))
       (let ((orig
-             (intern (concat (symbol-name mode) "-hook"))))
+             (intern (concat (symbol-name mode) "-hook")))
+            (file (or file mode)))
         ;; set a loader for that hook decorator
         (setf (alist-get decorator my/hook-decorators)
               (if (and loader (functionp loader))
                   loader
                 (lambda ()
-                  (add-to-list orig (lambda () (run-hooks decorator)))))))))
+                  (with-eval-after-load file
+                    (add-to-list orig (lambda () (run-hooks decorator))))))))))
 
   (defun my:inject-hook-decorators ()
     "Inject hook decorators to those hooks to be decorated."
@@ -285,11 +293,7 @@ Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may b
           my/hook-decorators))
 
   (my:define-hook-decorator 'prog-mode)
-  (my:define-hook-decorator
-   'org-mode
-   (lambda ()
-     (with-eval-after-load 'org
-       (add-hook 'org-mode-hook (lambda () (run-hooks 'my/org-mode-hook))))))
+  (my:define-hook-decorator 'org-mode 'org)
 
   (add-hook 'after-init-hook #'my:inject-hook-decorators)
 #+end_src
@@ -307,10 +311,10 @@ With this predicate, we can avoid loading something packages that may cause prob
 ~nerd-icons~ provides a basic recipe, and ~diminish~ beautifies the modeline.
 
 #+begin_src emacs-lisp
-  (defvar my/be-iconic-p (char-displayable-p ?))
-
   (use-package use-package
     :preface
+    (defvar my/be-iconic-p (char-displayable-p ?))
+
     (define-advice use-package-handler/:diminish
         (:override (name _keyword arg rest state))
       (let ((body (use-package-process-keywords name rest state)))
@@ -588,7 +592,7 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
           xref-show-definitions-function #'consult-xref)
 
     ;; Avoid fontify lagging problem [[https://github.com/minad/consult/issues/329]]
-    (setq consult-fontify-max-size 1024)
+    (setq consult-fontify-max-size 4096)
 
     :config
     ;; Optionally configure preview. The default value
@@ -1396,16 +1400,15 @@ Edit text as structural data.
   ;; indirect edit everywhere
   (use-package separedit
     :ensure t
+    :commands (separedit)
     :bind
     (:map prog-mode-map
-          ("C-c '" . separedit)
-          :map minibuffer-local-map
-          ("C-c '" . separedit)
-          :map help-mode-map
-          ("C-c '" . separedit)
-          :map org-src-mode-map
-          ("C-c C-'" . separedit)
-          )
+     ("C-c '" . separedit)
+     :map minibuffer-local-map
+     ("C-c '" . separedit)
+     :map help-mode-map
+     ("C-c '" . separedit)
+     )
     )
 
   ;; fold code blocks
@@ -1452,19 +1455,32 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
               company-lighter-base
               )
     :preface
-    (defun my:add-grouped-company-backends (backends)
-      (with-eval-after-load 'company
-        (add-to-list
-         (if (bound-and-true-p company-fuzzy-mode)
-             'company-fuzzy--backends
-           'company-backends)
-         (append backends
-                 '(:with company-yasnippet company-dabbrev-code)))))
+    (defun my:company-backend-add (backends)
+      (if (bound-and-true-p company-fuzzy-mode)
+          (progn
+            (company-fuzzy-backend-add backends)
+            (setf company-fuzzy--backends
+                  (company-fuzzy--normalize-backend-list company-fuzzy--recorded-backends)))
+        (add-to-list backends company-backends)))
+
+    (defun my:select-company-backends ()
+      (letrec
+          ((table
+            '((prog-mode . (company-dabbrev-code company-gtags company-etags company-keywords))
+              ((c-mode c++-mode) . (company-clang company-semantic company-cmake))))
+           (tester
+            (lambda (cs)
+              (let ((modes (car cs))
+                    (backends (cdr cs)))
+                (when (derived-mode-p modes)
+                  (my:company-backend-add backends))))))
+      (mapc tester table)))
     :config
     ;; currently there is some problems with loading company-capf
     (require 'company-capf)
     (when my/be-iconic-p (setq company-lighter-base "󰐱"))
     :custom
+    (company-backends '(company-capf company-abbrev company-dabbrev company-yasnippet))
     (company-transformers '(delete-consecutive-dups
                             company-sort-by-backend-importance
                             company-sort-prefer-same-case-prefix))
@@ -1472,7 +1488,7 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     (company-files-exclusions '(".git/"))
     (company-format-margin-function 'company-text-icons-margin)
     (company-text-icons-add-background t)
-    (company-idle-delay 0)
+    (company-idle-delay 0.2)
     (company-selection-wrap-around t)
     (company-show-numbers t)
     (company-tooltip-align-annotations t)
@@ -1489,13 +1505,8 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
           ("TAB" . company-begin-backend)
           )
     :hook
-    (my/prog-mode . company-mode)
-    (emacs-lisp-mode
-     . (lambda ()
-         (my:add-grouped-company-backends '(company-capf))))
-    ((c-mode c++-mode)
-     . (lambda ()
-         (my:add-grouped-company-backends '(company-clang company-semantic))))
+    ((my/prog-mode my/org-mode) . company-mode)
+    (company-mode . my:select-company-backends)
     )
 
   (use-package liquidmetal :ensure t)
@@ -1503,7 +1514,8 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     :ensure t
     :diminish (company-fuzzy-mode . "")
     :defines (company-fuzzy-mode
-              company-fuzzy--backends)
+              company-fuzzy--backends
+              company-fuzzy--recorded-backends)
     :custom
     (company-fuzzy-sorting-backend 'liquidmetal)
     :config
@@ -1582,15 +1594,6 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
 They are FANTASTIC!!!
 
 #+begin_src emacs-lisp
-  (use-package color-identifiers-mode
-    :ensure t
-    :diminish (color-identifiers-mode . "  ")
-    :custom
-    (color-identifiers-coloring-method 'hash)
-    :hook
-    (my/prog-mode . color-identifiers-mode-maybe)
-    )
-
   (use-package diff-hl
     :ensure t
     :when my/load-gui-config-p
@@ -1598,7 +1601,6 @@ They are FANTASTIC!!!
     :commands (diff-hl-mode)
     :custom (global-diff-hl-mode t)
     :hook
-    (magit-pre-refresh  . diff-hl-magit-pre-refresh)
     (magit-post-refresh . diff-hl-magit-post-refresh)
     )
 
@@ -1619,7 +1621,6 @@ They are FANTASTIC!!!
     :ensure t
     :config
     (require 'indent-bars-ts)           ; not needed with straight
-    (advice-add 'c-set-style :after 'indent-bars-reset)
     :custom
     (indent-bars-no-descend-lists t) ; no extra bars in continued func arg lists
     (indent-bars-treesit-support t)
@@ -1742,9 +1743,9 @@ Gnu global is much faster than ctags for emacs.
 #+end_src
 
 ** code analysis
-cedet semantic mode, a sophisticated mode with LL(1) code analyzer.
+cedet semantic mode, a sophisticated mode with LL(1) code parser framework.
 
-I like to use it with c/c++, semantic-ia does realtime header parsing, which is really powerful.
+I like to use it with c/c++, semantic-ia does realtime header parsing, which is really powerful. To make use of all of the IDE features provided by cedet, run ~global-ede-mode~.
 
 #+begin_src emacs-lisp
   (use-package semantic
@@ -1768,9 +1769,7 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
     )
 #+end_src
 
-Emacs has introduced built-in Language Server Protocol (LSP) support
-since emacs29, with ~eglot~ package. This package has no extra
-dependencies, and provides out-of-box lsp client service.
+Emacs has introduced built-in Language Server Protocol (LSP) support since emacs29, with ~eglot~ package. This package has no extra dependencies, and provides out-of-box lsp client service.
 
 #+begin_src emacs-lisp
   (use-package eglot
@@ -1820,20 +1819,21 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
           (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
 
   (setq major-mode-remap-alist
-        '((css-mode . css-ts-mode)
+        '((sh-mode . bash-ts-mode)
+          (c-mode . c-ts-mode)
+          (c++-mode . c++-ts-mode)
+          (css-mode . css-ts-mode)
           (go-mode . go-ts-mode)
           (go-mod-mode . go-mod-ts-mode)
           (haskell-mode . haskell-ts-mode)
-          (html-mode . html-ts-mode)
+          (mhtml-mode . html-ts-mode)
           (java-mode . java-ts-mode)
-          (js-mode . js-ts-mode)
+          (javascript-mode . js-ts-mode)
           (js-json-mode . json-ts-mode)
           (lua-mode . lua-ts-mode)
           (python-mode . python-ts-mode)
           (ruby-mode . ruby-ts-mode)
-          (rust-mode . rust-ts-mode)
-          (tsx-mode . tsx-ts-mode)
-          (typescript-mode . typescript-ts-mode)))
+          (rust-mode . rust-ts-mode)))
 
   ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
   (mapc
@@ -1843,18 +1843,22 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
              (major-ts-mode-hook
               (intern (concat (symbol-name (cdr major-mode-remap)) "-hook"))))
          (add-hook major-ts-mode-hook
-                   `(lambda () (run-hooks (quote ,major-mode-hook))))))
+                   `(lambda () (run-hooks ',major-mode-hook)))))
    major-mode-remap-alist)
 
   ;; We may enable some built-in treesit modes directly to be lazy
   (use-package treesit
     :autoload (treesit-ready-p)
     :init
-    (when (treesit-ready-p 'cmake t)
-      (add-to-list 'auto-mode-alist
-                   '("\\(?:CMakeLists\\.txt\\|\\.cmake\\)\\'" . cmake-ts-mode)))
-    (when (treesit-ready-p 'yaml t)
-      (add-to-list 'auto-mode-alist '("\\.ya?ml\\'" . yaml-ts-mode)))
+    (defmacro auto-ts-mode (language regexp &optional func)
+      `(when (treesit-ready-p ',language t)
+         (add-to-list 'auto-mode-alist
+                      '(,regexp . ,(if func func (intern (concat (symbol-name language) "-ts-mode")))))))
+
+    (auto-ts-mode cmake "\\(?:CMakeLists\\.txt\\|\\.cmake\\)\\'")
+    (auto-ts-mode yaml "\\.ya?ml\\'")
+    (auto-ts-mode typescript "\\.ts\\'")
+    (auto-ts-mode typescript "\\.tsx\\'" tsx-ts-mode)
     )
 #+end_src
 
@@ -1895,11 +1899,9 @@ With this package we can also prettify the c macro expansion, which is not prett
               (switch-to-prev-buffer))
           nil))
       )
-
-    :bind
-    (:map c-mode-map
-          ([remap c-macro-expand] . #'my:c-macro-expand)
-          )
+    :hook
+    ((c-mode c++-mode)
+     . (lambda () (keymap-local-set "C-c C-e" #'my:c-macro-expand)))
     )
 #+end_src
 
@@ -1947,18 +1949,18 @@ License is necessary for your open-source projects
 
 Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++ compilation, but it is not actively maintained, and depends on a ~.project~ file which is not that convenient.
 #+begin_src emacs-lisp
-  (use-package cc-mode
+  (use-package emacs
     :hook
-    (c-mode
+    ((c-mode c++-mode)
      . (lambda () ;; one-key C file compilation
          (unless (or (null (buffer-file-name))
                      (file-exists-p "Makefile"))
            (let ((file (file-name-nondirectory buffer-file-name)))
              (set (make-local-variable 'compile-command)
-                ;; emulate make's .c.o implicit pattern rule, but with
-                ;; different defaults for the CC, CPPFLAGS, and CFLAGS
-                ;; variables:
-                ;; $(CC) -c -o $@ $(CPPFLAGS) $(CFLAGS) $<
+                  ;; emulate make's .c.o implicit pattern rule, but with
+                  ;; different defaults for the CC, CPPFLAGS, and CFLAGS
+                  ;; variables:
+                  ;; $(CC) -c -o $@ $(CPPFLAGS) $(CFLAGS) $<
                   (format "%s -o %s %s %s %s"
                           (or (getenv "CC") "gcc")
                           (file-name-sans-extension file)
@@ -1968,11 +1970,9 @@ Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++
              (set (make-local-variable 'gud-gud-gdb-command-name)
                   (format "gdb --fullname %s"
                           (file-name-sans-extension file)))
-             ))))
-    :bind
-    (:map c-mode-map
-          ("C-c C-r" . compile)
-          ("C-c C-d" . gud-gdb))
+             ))
+         (keymap-local-set "C-c C-r" #'compile)
+         (keymap-local-set "C-c C-d" #'gud-gdb)))
     )
 
   (use-package gud :diminish (gud-mode . " "))
@@ -1993,6 +1993,17 @@ Most of them are not configured and deferred.
 #+begin_src emacs-lisp
   (use-package lilypond-mode
     :mode ("\\.i?ly\\'" . LilyPond-mode)
+    )
+
+  (use-package sclang
+    :mode ("\\.sc\\'" . sclang-mode)
+    )
+
+  (use-package racket-mode
+    :ensure t
+    :custom
+    (racket-browse-url-function 'eww-browse-url)
+    :hook (racket-mode . racket-xp-mode)
     )
 
   (use-package haskell-mode
@@ -2073,7 +2084,7 @@ Most of them are not configured and deferred.
   (use-package geiser
     :ensure t
     :defines (my:geiser-directory)
-    :init
+    :preface
     (defun my:geiser-file-path (name)
       (file-name-concat
        (my:strong-directory (file-name-concat user-emacs-directory "geiser/"))
@@ -2171,8 +2182,9 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-latex-listings 'minted)
     (org-latex-packages-alist '(("" "color") ("" "minted") ("" "parskip") ("" "tikz") ("" "amsfonts") ("" "amsmath") ("" "amsthm")))
     (org-latex-pdf-process
-     '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f"
-       "latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f"))
+     (if (executable-find "latexmk")
+         '("latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f")
+       '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f")))
     (org-plantuml-jar-path "/usr/share/java/plantuml/plantuml.jar")
     (org-pretty-entities t)
     (org-pretty-entities-include-sub-superscripts nil)
@@ -2185,21 +2197,21 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-use-sub-superscripts nil)
     :config
     ;; pdflatex is not very efficient, but only pdflatex supports tikz
+    ;; original configuration use magick, but dvisvgm actually supports pdf
     (add-to-list
      'org-preview-latex-process-alist
-     '(magick
-       :programs ("latex" "magick")
-       :description "pdf > png"
-       :message "you need to install the programs: latex and imagemagick."
-       :image-input-type "pdf"
-       :image-output-type "png"
-       :image-size-adjust (1.0 . 1.0)
-       :latex-compiler
+     '(dvisvgm-pdf
+       :programs ("latex" "dvisvgm") :description "pdf > svg"
+       :message
+       "you need to install the programs: latex and dvisvgm."
+       :image-input-type "pdf" :image-output-type "svg"
+       :image-size-adjust (1.0 . 1.0) :latex-compiler
        ("pdflatex -interaction nonstopmode -output-directory %o %f")
        :image-converter
-       ("magick -density %D %f -trim -antialias -quality 100 %O")))
+       ("pdfcrop %f %f"
+        "dvisvgm --pdf --no-fonts --exact --scale=%S %f --output=%O")))
 
-    (setq org-preview-latex-default-process 'magick)
+    (setq org-preview-latex-default-process 'dvisvgm-pdf)
 
     ;; This must be deferred after `org-preview-latex-process-alist' is set
     (setq org-babel-load-languages
@@ -2250,6 +2262,8 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      ("C-S-<right>" . windower-move-border-right)
      ("C-S-<up>"    . windower-move-border-above)
      ("C-S-<down>"  . windower-move-border-below)
+     :map org-src-mode-map
+     ("C-c C-'" . separedit)
      )
     )
 
@@ -2472,7 +2486,7 @@ These applications are actually desktop-level, BTW I use Emacs.
      )
     )
 
-  (use-package go-translate
+  (use-package gt
     :ensure t
     :autoload (gt-start
                gt-taker
@@ -2497,8 +2511,7 @@ These applications are actually desktop-level, BTW I use Emacs.
         . ,(gt-translator
             :taker (gt-taker)
             :engines (list (gt-youdao-dict-engine)
-                           (gt-bing-engine)
-                           (gt-google-rpc-engine))
+                           (gt-google-engine))
             :render (gt-buffer-render)))
        (ts-offline
         . ,(gt-translator
@@ -2534,7 +2547,7 @@ These applications are actually desktop-level, BTW I use Emacs.
        ))
 
     :bind
-    ("M-\"" . gt-do-translate) ;; press C-n and C-p to loop languages
+    ("M-\"" . gt-translate) ;; press C-n and C-p to loop languages
     ("C-M-\"" . my:gt-do-translate-quickly)
     )
 
