@@ -1,6 +1,6 @@
 #+title: Koishimacs
 #+author: gynamics
-#+date: 2024:07:21
+#+date: 2025:09:25
 
 Prepare to lose your mind in Emacs!
 
@@ -13,20 +13,20 @@ Read [[file:koishimacs.org::*preface][koishimacs.org:Prelude:preface]] if you ar
 
 GUI dashboard
 
-[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMNaBpF1ZkwBGbC9Czc3yBzNbo8lU0AAj_AMRvXj9lUIjE9opM4LMcBAAMCAAN3AAM2BA.png]]
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMPaNVZ9PupaqSFGRu5bdaPU3wBqKgAAtHIMRvxsqhWaQABNlF_P-63AQADAgADdwADNgQ.png]]
 
 TUI
 
-[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMOaBpF6plqDr-UCiaglzw2ILFYuqkAAkDAMRvXj9lU22yJd5OBDwcBAAMCAAN5AAM2BA.png]]
+[[https://exiled-images.pages.dev/file/AgACAgUAAyEGAASL6SCLAAMQaNVamJ4G362g1CZZwFVO-kWswF4AAtPIMRvxsqhWgIuMQv011tABAAMCAAN5AAM2BA.png]]
 
 * Features
-- A sweet logo (handdrawn, original character by /Team Shanghai Alice/)
+- A sweet logo (hand-drawn, original character by /Team Shanghai Alice/)
 - A sweet theme ([[https://github.com/gynamics/koishi-theme.el][koishi-theme]] designed by gynamics)
 - A minimal literate startup framework, all in one org document.
 - Quick deployment (see [[*Bootstrap][Bootstrap]]).
-- Use both ~package.el~ and ~el-get.el~ for package fetching.
+- Use built-in ~package.el~ for package fetching and management.
 - Out of the box as a powerful text editor, IDE or org editor.
-- Comes with unicode font GUI configuration (especially Chinese).
+- Comes with Unicode font GUI configuration (especially Chinese).
 - Starts up fast, GUI starts up in no more than 2 seconds on a modern machine.
 - Even faster in terminal.
 - Configured as a multi-frame editor when working in daemon mode.
@@ -38,27 +38,27 @@ TUI
      git clone https://github.com/gynamics/koishimacs
    #+end_src
 
-2. Please at least have a look at [[file:koishimacs.org::*package manager][koishimacs.org:Prelude:package manager]] and section [[file:koishimacs.org::*environment][koishimacs.org:Prelude:environment]] to get ~ELPA~ mirror urls, ~PATH~, ~http_proxy~ and other environment variables configured correctly.
+2. Please at least have a look at [[file:koishimacs.org::*package manager][koishimacs.org:Prelude:package manager]] and section [[file:koishimacs.org::*environment][koishimacs.org:Prelude:environment]] to get ~ELPA~ mirror URLs, ~PATH~, ~http_proxy~ and other environment variables configured correctly.
 
    You may also want to configure ~org-directory~ and ~org-roam-directory~ at the same time, just search and modify these ~:custom~ cells in section [[file:koishimacs.org::*Org Editor][koishimacs.org:Org Editor]], it is not a difficult task.
 
    You can remove unwanted blocks easily by add ~:tangle no~ to it, or simply delete one ~use-package~ block. After all, ~git~ records it for you.
 
-3. Then, copy it to ~$HOME/.config/emacs~ or ~$HOME/.emacs.d~ to replace your old ~user-emacs-directory~.
+3. Then, you can try to start up koishimacs with:
 
    #+begin_src sh
-     mv ~/.config/emacs ~/.config/emacs-backup # backup your previous config
-     cp -r koishimacs ~/.config/emacs
+     emacs --init-directory=/path/to/koishimacs
    #+end_src
 
-4. Now simply start your emacs, wait for about 3 to 5 minutes for package installation.
+   Now wait for about 3 to 5 minutes for package installation. If no problems arise, welcome!
 
-5. Finally, do remaining steps to complete the installation. There is an untangled block at [[file:koishimacs.org::*postscript][koishimacs.org:postscript]] that does these things.
+4. Finally, do remaining steps to complete the installation. There is an untangled block at [[file:koishimacs.org::*postscript][koishimacs.org:postscript]] that does these things.
 
+- Currently koishimacs uses [[https://dejavu-fonts.github.io/][DejaVu Fonts]] as its default font.
 - There may be some external program dependencies, like ~ripgrep~, ~global~ or ~curl~. Most of them are not necessary for basic usage, install them on yourselves if you need.
-- [[https://www.nerdfonts.com][nerd-fonts]] is highly recommended for display various icons. ~Symbols Nerd Font~ covers most unicode icons used. As for Chinese font, the default Chinese font I use is ~LXGW Wenkai Mono~.
+- [[https://www.nerdfonts.com][nerd-fonts]] is highly recommended for display various icons. ~Symbols Nerd Font~ covers most Unicode icons used. As for Chinese font, the default Chinese font I use is ~LXGW Wenkai Mono~.
 
 * Maintenance
 The mainline code will keep updating on my personal taste, fork it if you could be inspired, to some degree. Do *NOT* pull it, it is not meant to have a contiguous integration process.
 
-Feel free to discuss with me in Issues or E-mail, I am also active on EmacsChina Forum, recently.
+Feel free to discuss with me in Issues or E-mail, I am also active on Emacs China Forum, recently.
