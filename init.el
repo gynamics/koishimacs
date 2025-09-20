@@ -40,12 +40,6 @@
  ;; If there is more than one, they won't work right.
  '(package-quickstart t))
 
-(custom-set-faces
- ;; custom-set-faces was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
- '(default ((t (:family "DejaVu Sans Mono" :foundry "SRC" :slant normal :weight regular :height 120 :width normal)))))
 
 (let ((literate-config (concat user-emacs-directory "koishimacs.org"))
       (code-config (concat user-emacs-directory "koishimacs.el")))
@@ -57,7 +51,7 @@
       ;; Otherwise use org-babel to tangle the literate configuration
       (progn
         ;; do not load any org modules before tangling
-        (setq org-modules nil)
+        (defvar org-modules nil)
         (require 'org)
         (org-babel-load-file literate-config)))
     ))
