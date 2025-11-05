@@ -17,7 +17,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.9.0
+  ;; Version: 5.10.0
 
   ;;; Commentary:
 
@@ -199,7 +199,8 @@ To accelerate emacs startup we can do:
     (define-advice use-package-handler/:vc
         (:around (fn name keyword args rest state))
       (add-to-list 'use-package-vc-selected-packages
-                   (use-package-as-symbol name))
+                   (cons (car args) (cadr args)))
+      (add-to-list 'use-package-selected-packages (car args))
       (funcall fn name keyword args rest state))
 
     (defun my:one-off-hook (hook function)
@@ -295,7 +296,7 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
           (async-byte-recompile-directory
            (concat (file-name-as-directory dir) file)))))
 
-    (async-bytecomp-package-mode 1)
+    (async-bytecomp-package-mode)
     )
 #+end_src
 
@@ -357,7 +358,7 @@ still can not set this in ~early-init.el~
   (use-package use-package
     :preface
     (defvar my/be-iconic-p (char-displayable-p ?))
-
+    :config
     (define-advice use-package-handler/:diminish
         (:around (orig-fun &rest args))
       (if my/be-iconic-p
@@ -417,9 +418,9 @@ Setup GUI. We can set the initial X window size and position. It is a pity that 
     ;; set faces
     (my:map-set-face-attribute
      '(default nil :family "DejaVu Sans Mono" :slant normal :weight regular :height 128)
-     '(fixed-pitch nil :family "DejaVu Sans Mono")
-     '(variable-pitch nil :family "DejaVu Sans")
-     '(Info-quoted nil :family "DejaVu Sans Mono" :weight bold)
+     '(fixed-pitch nil :family "DejaVu Sans Mono" :slant normal :weight regular :height 128)
+     '(fixed-pitch-serif nil :family "FreeMono" :weight bold :height 136)
+     '(variable-pitch nil :family "DejaVu Serif" :height 136)
      )
     ;; set default frame title
     (setq-default frame-title-format
@@ -474,21 +475,21 @@ Terminal mode configuration, actually there are very little we can do to the ema
     (menu-bar-mode -1)
     ;; enable mouse navigation if supported
     (xterm-mouse-mode)
+    ;; fix arrow keys in some terminals
+    (defvar arrow-keys-map (make-sparse-keymap)
+      "Keymap for arrow keys.")
+
+    (bind-keys
+     :map arrow-keys-map
+     ("A" [up])
+     ("B" [down])
+     ("C" [right])
+     ("D" [left]))
+    ;; arrow keys may be broken in some terminals,
+    ;; define a wrapper to translate ESC [ or ESC O
+    (define-key esc-map "[" arrow-keys-map)
+    (define-key esc-map "O" arrow-keys-map)
     )
-
-  (defvar arrow-keys-map (make-sparse-keymap)
-    "Keymap for arrow keys.")
-
-  (bind-keys
-   :map arrow-keys-map
-   ("A" [up])
-   ("B" [down])
-   ("C" [right])
-   ("D" [left]))
-  ;; arrow keys may be broken in some terminals,
-  ;; define a wrapper to translate ESC [ or ESC O
-  (define-key esc-map "[" arrow-keys-map)
-  (define-key esc-map "O" arrow-keys-map)
 #+end_src
 
 ** be iconic
@@ -528,7 +529,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
 
 #+begin_src emacs-lisp
   ;; violet-line
-  (defun violet-line-shrink-path (path &optional max-pixel-width)
+  (defun violet-line--shrink-path (path &optional max-pixel-width)
     (let ((max-pixel-width (or max-pixel-width 600)))
       (if (< (string-pixel-width path) max-pixel-width)
           path
@@ -569,7 +570,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
                      (delete 'mode-line-format-right-align
                              (remove 'violet-line-buffer-identification
                                      mode-line-format)))))))
-           (violet-line-shrink-path
+           (violet-line--shrink-path
             (if-let ((s (buffer-file-name)))
                 (abbreviate-file-name s)
               (buffer-name))
@@ -604,7 +605,9 @@ Terminal mode configuration, actually there are very little we can do to the ema
   (put 'violet-line-position 'risky-local-variable t)
 
   (defface violet-line-emphasis-1
-    '((t (:foreground "#ADC" :weight bold)))
+    `((t (:foreground
+          ,(if (bound-and-true-p koishi-theme-light) "#523" "#ADC")
+          :weight bold)))
     "A custom face for violet-line segment display.")
 
   (defvar-local violet-line-modes
@@ -1257,8 +1260,9 @@ A big but useless thing.
     (dashboard-set-init-info     t)
     (dashboard-set-navigator     t)
     (dashboard-image-extra-props '(:mask heuristic))
-    (dashboard-startup-banner    (my:weak-path (file-name-concat
-                                                user-emacs-directory "icons/koishimacs-logo.svg")))
+    (dashboard-startup-banner
+     (my:weak-path (file-name-concat
+                    user-emacs-directory "icons/koishimacs-logo.svg")))
     :bind
     (:map dashboard-mode-map
           ("a" . org-agenda)
@@ -1327,6 +1331,22 @@ A hacker can fly across lines and frames.
 More previews and visual feedback.
 
 #+begin_src emacs-lisp
+  (use-package simple
+    :diminish (visual-line-mode . " 󰴐")
+    :hook (my/org-mode . visual-line-mode)
+    :bind
+    ("C-c v l" . visual-line-mode)
+    )
+
+  (use-package visual-fill-column
+    :ensure t
+    :custom
+    (visual-fill-column-center-text t)
+    :bind
+    ("C-c v f" . visual-fill-column-mode)
+    ("C-c v c" . visual-fill-column-toggle-center-text)
+    )
+
   (use-package visual-regexp
     :ensure t
     :bind
@@ -1338,12 +1358,6 @@ More previews and visual feedback.
     :ensure t
     :bind
     ("C-c C-/" . vundo)
-    )
-
-  (use-package visual-fill-column
-    :ensure t
-    :bind
-    ("C-c v c" . visual-fill-column-mode)
     )
 
   ;; view large file
@@ -1358,6 +1372,7 @@ More previews and visual feedback.
 #+end_src
 
 ** snippet
+Writing with templates.
 
 #+begin_src emacs-lisp
   (use-package yasnippet
@@ -1396,43 +1411,29 @@ More previews and visual feedback.
     )
 #+end_src
 
-** optimized edit
-Less is more.
+** structural edit
+Edit text as structural data.
 
 #+begin_src emacs-lisp
-  (use-package edit-at-point
-    :ensure t
-    :autoload (edit-at-point-symbol-copy
-               edit-at-point-symbol-cut)
-    :functions (my:kill-ring-save
-                my:kill-region)
-    :init
-    (defun my:kill-ring-save ()
-      "Copy region with noselect action."
-      (interactive)
-      (if (region-active-p)
-          (call-interactively #'kill-ring-save)
-        (call-interactively #'edit-at-point-symbol-copy)))
-
-    (defun my:kill-region ()
-      "Kill region with noselect action."
-      (interactive)
-      (if (region-active-p)
-          (call-interactively #'kill-region)
-        (call-interactively #'edit-at-point-symbol-cut)))
-
-    :bind
-    ("C-w"   . my:kill-region)
-    ("M-w"   . my:kill-ring-save)
-    ("C-x w" . edit-at-point-line-cut)
-    ("C-x y" . edit-at-point-line-copy)
-    )
-
   (use-package smartparens
     :ensure t
     :diminish (smartparens-mode . " 󱃗")
     :init
     (require 'smartparens-config)
+
+    (defun my:kill-ring-save ()
+      "Copy region with noselect action -- save current sexp."
+      (interactive)
+      (if (region-active-p)
+          (call-interactively #'kill-ring-save)
+        (call-interactively #'sp-copy-sexp)))
+
+    (defun my:kill-region ()
+      "Kill region with noselect action -- kill current sexp."
+      (interactive)
+      (if (region-active-p)
+          (call-interactively #'kill-region)
+        (call-interactively #'sp-kill-sexp)))
     :bind
     ;; there are already in `esc-map', with ESC C- compose
     ;; or C-M- compose
@@ -1449,17 +1450,13 @@ Less is more.
     ("M-<backspace>" . sp-unwrap-sexp) ;; (a) -> a
     ("M-(" . sp-wrap-round)            ;; a -> (a)
     ("M-)" . sp-rewrap-sexp)   ;; (a b) -> [a b]
-    ("M-W" . sp-copy-sexp)
+    ;; add default behavior for C-w and M-w
+    ("C-w" . my:kill-region)
+    ("M-w" . my:kill-ring-save)
     :hook
     (my/prog-mode . smartparens-mode)
     )
 
-#+end_src
-
-** structural edit
-Edit text as structural data.
-
-#+begin_src emacs-lisp
   (use-package multiple-cursors
     :ensure t
     :diminish (multiple-cursors-mode . " 󰗧")
@@ -1534,34 +1531,47 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
               company-lighter-base
               )
     :preface
-    (defun my:company-backend-add (backends)
-      (if (bound-and-true-p company-fuzzy-mode)
-          (progn
-            (company-fuzzy-backend-add backends)
-            (setf company-fuzzy--backends
-                  (company-fuzzy--normalize-backend-list company-fuzzy--recorded-backends)))
-        (add-to-list backends company-backends)))
+    (defvar my/company-base-backends
+      '(company-capf company-files company-yasnippet))
+
+    (defvar my/company-cascade-table
+      '(((c-mode c++-mode) . (company-clang company-semantic company-cmake))
+        (prog-mode . (company-dabbrev-code company-gtags company-etags company-keywords))
+        (text-mode . (company-dabbrev company-ispell))
+        ))
+
+    (defun my:polymeric-company-backends (backends)
+      (cl-loop
+       for backend in backends
+       for pos = (cl-position ':with backend)
+       if pos
+       collect (cl-subseq backend 0 pos) into ctx-aware
+       and collect (cl-subseq backend (1+ pos)) into ctx-agnostic
+       else
+       collect (cl-subseq backend 0) into ctx-aware
+       finally return
+       (cl-remove-duplicates
+        (apply #'append
+               (append ctx-aware '((:with)) ctx-agnostic)))))
 
     (defun my:select-company-backends ()
-      (letrec
-          ((table
-            '((prog-mode . (company-dabbrev-code company-gtags company-etags company-keywords))
-              ((c-mode c++-mode) . (company-clang company-semantic company-cmake))))
-           (tester
-            (lambda (cs)
-              (let ((modes (car cs))
-                    (backends (cdr cs)))
-                (when (derived-mode-p modes)
-                  (my:company-backend-add backends))))))
-      (mapc tester table)))
+      (let ((selected
+             (cons
+              my/company-base-backends
+              (mapcan
+               (lambda (cs)
+                 (when (derived-mode-p (car cs))
+                   (list (cdr cs))))
+               my/company-cascade-table))))
+        (setq-local company-backends
+                    (list (my:polymeric-company-backends selected)))))
+
     :config
-    ;; currently there is some problems with loading company-capf
-    (require 'company-capf)
     (when my/be-iconic-p (setq company-lighter-base "󰐱"))
     (when my/load-gui-config-p
       (set-face-attribute 'company-tooltip nil :inherit 'fixed-pitch))
     :custom
-    (company-backends '(company-capf company-abbrev company-dabbrev company-files company-yasnippet))
+    (company-backends (list my/company-base-backends))
     (company-transformers '(delete-consecutive-dups
                             company-sort-by-backend-importance
                             company-sort-prefer-same-case-prefix))
@@ -1582,24 +1592,6 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     (company-mode . my:select-company-backends)
     )
 
-  (use-package liquidmetal :ensure t)
-  (use-package company-fuzzy
-    :ensure t
-    :diminish company-fuzzy-mode
-    :defines (company-fuzzy-mode
-              company-fuzzy--backends
-              company-fuzzy--recorded-backends)
-    :custom
-    (company-fuzzy-sorting-backend 'liquidmetal)
-    :config
-    (when my/be-iconic-p (setq-local company-lighter-base "󱓚"))
-    :hook
-    (company-mode
-     . (lambda ()
-         (unless (bound-and-true-p company-coq-mode)
-           (company-fuzzy-mode))))
-    )
-
   (use-package company-quickhelp
     :ensure t
     :hook (company-mode . company-quickhelp-mode)
@@ -1616,33 +1608,31 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
   (use-package company-coq
     :ensure t
     :diminish company-coq-mode
+    :init
+    (add-to-list
+     'my/company-cascade-table
+     '(coq-mode . (company-coq-mode)))
     :config
     (when my/be-iconic-p (setq-local company-lighter-base "󱓘"))
-    :hook
-    (coq-mode
-     . (lambda ()
-         (when (bound-and-true-p company-fuzzy-mode)
-           (company-fuzzy-mode -1)
-           (company-coq-mode))))
     )
 
   (use-package company-maxima
     :ensure t
-    :hook
-    ((maxima-mode maxima-inferior-mode)
-     . (lambda ()
-         (require 'company-maxima)
-         (my:add-grouped-company-backend
-          '(company-maxima-symbols company-maxima-libraries))))
+    :autoload (company-maxima-symbols company-maxima-libraries)
+    :init
+    (add-to-list
+     'my/company-cascade-table
+     '((maxima-mode maxima-inferior-mode)
+       . (company-maxima-symbols company-maxima-libraries)))
+    :hook (maxima-inferior-mode . company-mode)
     )
 
   (use-package company-shell
     :ensure t
-    :hook
-    (shell-script-mode
-     . (lambda ()
-         (my:add-grouped-company-backend
-          '(company-shell company-shell-env))))
+    :init
+    (add-to-list
+     'my/company-cascade-table
+     '((shell-script-mode . (company-shell company-shell-env))))
     )
 
   (use-package slime-company
@@ -1650,15 +1640,6 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     :hook
     (slime-mode
      . (lambda () (slime-setup '(slime-fancy slime-company))))
-    )
-
-  (use-package company-web
-    :ensure t
-    :hook
-    (web-mode
-     . (lambda ()
-         (my:add-grouped-company-backend
-          '(company-web-html company-files))))
     )
 #+end_src
 
@@ -1699,6 +1680,8 @@ They are FANTASTIC!!!
     :config
     (require 'indent-bars-ts)           ; not needed with straight
     :custom
+    ;; 2025-11-5: currently the default bar character is buggy in terminal
+    (indent-bars-no-stipple-char (if my/be-iconic-p ?¦ ?|))
     (indent-bars-no-descend-lists t) ; no extra bars in continued func arg lists
     (indent-bars-treesit-support t)
     (indent-bars-treesit-ignore-blank-lines-types '("module"))
@@ -1718,8 +1701,14 @@ They are FANTASTIC!!!
     :ensure t
     :diminish (highlight-parentheses-mode . " 󰵪")
     :custom (highlight-parentheses-colors
-             '("cyan" "yellow" "magenta" "red" "green" "blue"))
+             '("aquamarine" "yellow" "violet" "tomato" "chartreuse" "deep sky blue"))
     :hook (my/prog-mode . highlight-parentheses-mode)
+    )
+
+  (use-package paren
+    :custom (show-paren-style 'mixed)
+    :custom-face (show-paren-match-expression ((t (:inherit t :background "#554565"))))
+    :hook (my/prog-mode . show-paren-mode)
     )
 
   (use-package highlight-escape-sequences
@@ -1823,9 +1812,6 @@ Gnu global is much faster than ctags for emacs.
     :ensure t
     :hook (c-mode . gtags-mode)
     )
-
-  ;; xref-union allow us to use multiple xref backends together
-  (use-package xref-union :ensure t)
 #+end_src
 
 ** code analysis
@@ -1837,12 +1823,12 @@ I like to use it with c/c++, semantic-ia does realtime header parsing, which is 
   (use-package semantic
     :custom
     (semantic-idle-truncate-long-summaries nil)
-    :config
-    (require 'semantic/bovine/gcc)
-    (global-semanticdb-minor-mode 1)
-    (global-semantic-idle-summary-mode 1)
-    (global-semantic-stickyfunc-mode 1)
-    (global-semantic-decoration-mode 1)
+    (semantic-default-submodes
+     '(global-semantic-idle-scheduler-mode
+       global-semanticdb-minor-mode
+       global-semantic-idle-summary-mode
+       global-semantic-stickyfunc-mode)
+     )
     :bind
     (:map semantic-mode-map
           ("C-c , d" . semantic-ia-show-doc)
@@ -1859,6 +1845,8 @@ Emacs has introduced built-in Language Server Protocol (LSP) support since emacs
 
 #+begin_src emacs-lisp
   (use-package eglot
+    :custom
+    (eglot-stay-out-of '(company))
     :config
     ;; currently haskell-ts-mode is not supported yet
     (setf (alist-get 'haskell-ts-mode eglot-server-programs)
@@ -1912,7 +1900,7 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
           (go-mode . go-ts-mode)
           (go-mod-mode . go-mod-ts-mode)
           (haskell-mode . haskell-ts-mode)
-          (mhtml-mode . html-ts-mode)
+          (html-mode . html-ts-mode)
           (java-mode . java-ts-mode)
           (javascript-mode . js-ts-mode)
           (js-json-mode . json-ts-mode)
@@ -2014,7 +2002,7 @@ Since Emacs 28, Emacs has integrated ~project.el~ for project management. So we 
     ;; Allow interactively selecting available compilation targets from
     ;; the current project type.
     :bind
-    (:map project-prefix-map
+    (:map projection-map
           ("RET" . projection-multi-compile))
     )
 #+end_src
@@ -2082,6 +2070,20 @@ Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, and ~dape~ 
 Most of them are not configured and deferred.
 
 #+begin_src emacs-lisp
+  (use-package tex
+    :ensure auctex
+    :config
+    (if (package-installed-p 'pdf-tools)
+        (progn
+          (setf (alist-get 'output-pdf TeX-view-program-selection) '("PDF Tools"))
+          (add-hook 'TeX-after-compilation-finished-functions #'TeX-revert-document-buffer)
+          )
+      (setf (alist-get 'output-pdf TeX-view-program-selection) '("Zathura")))
+    :hook
+    (TeX-mode . TeX-fold-mode)
+    (TeX-mode . (lambda () (run-hooks 'my/prog-mode-hook)))
+    )
+
   (use-package lilypond-mode
     :mode ("\\.i?ly\\'" . LilyPond-mode)
     )
@@ -2124,16 +2126,9 @@ Most of them are not configured and deferred.
           ("C-c C-r" . run-haskell))
     )
 
-  (use-package python
-    :custom
-    (python-shell-virtualenv-root (my:weak-directory "~/.pyvenv"))
-    )
-
   (use-package pyvenv
     :ensure t
     :diminish "  "
-    :custom
-    (pyvenv-activate python-shell-virtualenv-root)
     :hook (python-mode . pyvenv-mode)
     )
 
@@ -2213,7 +2208,10 @@ Most of them are not configured and deferred.
   (use-package web-mode
     :ensure t
     :mode
-    (("\\.phtml\\'" . web-mode)
+    ;; currently mhtml-mode is broken, mhtml-ts-mode hasn't been released
+    ;; let's use web-mode instead
+    (("\\.html\\'" . web-mode)
+     ("\\.phtml\\'" . web-mode)
      ("\\.tpl\\.php\\'" . web-mode)
      ("\\.[agj]sp\\'" . web-mode)
      ("\\.as[cp]x\\'" . web-mode)
@@ -2234,7 +2232,6 @@ Most of them are not configured and deferred.
   (use-package riscv-mode :ensure t)
   (use-package rust-mode :ensure t)
   (use-package typescript-mode :ensure t)
-  (use-package tex :ensure auctex)
 #+end_src
 
 * Org Editor
@@ -2259,12 +2256,14 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     )
 
   (use-package gnus
+    :commands (gnus)
     :custom
     (gnus-home-directory
      (my:strong-directory (concat user-emacs-directory "gnus/")))
     (gnus-directory
      (concat gnus-home-directory "News/"))
     (mail-source-directory message-directory)
+    (smime-certificate-directory (concat message-directory "certs/"))
     :config
     (setq gnus-select-method '(nntp "news.gmane.io"))
     )
@@ -2326,8 +2325,9 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (setq org-preview-latex-default-process 'dvisvgm-pdf)
 
     ;; This must be deferred after `org-preview-latex-process-alist' is set
-    (setq org-babel-load-languages
-          '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t) (lilypond . t)))
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t) (lilypond . t)))
 
     ;; patch for org-9.7.* to display transparent png image.
     ;; it seems there is an Emacs bug to display transparency.
@@ -2358,7 +2358,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
        ("scheme" . scheme)
        ("lilypond" . LilyPond)))
 
-    (defun org-toggle-emphasis-markers ()
+    (defun my:org-toggle-emphasis-markers ()
       "Toggle visibility of emphasis markers in current buffer."
       (interactive)
       (set-variable 'org-hide-emphasis-markers (not org-hide-emphasis-markers))
@@ -2382,7 +2382,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
          )))
 
     :hook
-    (my/org-mode . (lambda () (when my/load-gui-config-p (setq line-spacing 0.2))))
+    (my/org-mode . (lambda () (when my/load-gui-config-p (setq line-spacing 0.1))))
     :bind
     (("C-c a" . org-agenda)
      ("C-c c" . org-capture)
@@ -2397,17 +2397,84 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      )
     )
 
-  (use-package simple
-    :diminish (visual-line-mode . " 󰴐")
-    :hook (my/org-mode . visual-line-mode)
-    :bind
-    ("C-c v l" . visual-line-mode)
-    )
-
   (use-package org-capture
     :diminish (org-capture-mode . " 󰄀")
     )
+#+end_src
 
+** org-roam
+Roam builds a note database by inserting a unique ID to your org notes.
+
+#+begin_src emacs-lisp
+  (use-package org-roam
+    :ensure t
+    :defines org-roam-cmd-map
+    :custom
+    (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam/")))
+    (org-roam-dailies-directory "dailies/")
+    (org-roam-db-location (file-name-concat org-roam-directory "org-roam.db"))
+    ;; Use FILE-TRUENAME to avoid expansion on this directory
+    (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
+    (org-roam-node-display-template
+     (concat "${title} " (propertize "${tags:30}" 'face 'org-tag)))
+    :init
+    (defvar org-roam-cmd-map (make-sparse-keymap)
+      "A keymap for org-roam related commands.")
+
+    (defun my:org-roam-consult-grep ()
+      "Grep in org-roam-directory with `consult-grep'."
+      (interactive)
+      (consult-grep org-roam-directory ""))
+    :config
+    (org-roam-db-autosync-mode)
+    :bind-keymap
+    ("C-c n" . org-roam-cmd-map)
+    :bind
+    (:map org-roam-cmd-map
+          ("l" . org-roam-buffer-toggle)
+          ("f" . org-roam-node-find)
+          ("g" . my:org-roam-consult-grep)
+          ("i" . org-roam-node-insert)
+          ("c" . org-roam-capture)
+          ("j" . org-roam-dailies-capture-today)
+          )
+    )
+
+  (use-package org-roam-ql
+    :ensure t
+    :bind
+    (:map org-roam-cmd-map
+          ("s" . org-roam-ql-search)
+          ("v" . org-roam-ql-buffer-dispatch)
+          )
+    )
+
+  (use-package org-roam-ui
+    :ensure t
+    :diminish
+    ((org-roam-ui-mode . " 󱗿")
+     (org-roam-ui-follow-mode . "  "))
+    :custom
+    (org-roam-ui-open-on-start nil)
+    :bind
+    (:map org-roam-cmd-map
+          ("u" . org-roam-ui-open)
+          ("z" . org-roam-ui-node-zoom)
+          )
+    )
+
+  (use-package org-roam-timestamps
+    :ensure t
+    :diminish org-roam-timestamps-mode
+    :one-off-hook
+    (org-mode . org-roam-timestamps-mode)
+    )
+#+end_src
+
+** extensions
+Other extensions that are helpful in ~org-mode~.
+
+#+begin_src emacs-lisp
   (use-package org-appear
     :ensure t
     :custom
@@ -2463,6 +2530,19 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :hook ((my/org-mode markdown-mode) . valign-mode)
     )
 
+  ;; play org document as slides
+  (use-package org-tree-slide :ensure t)
+  ;; for better org html output
+  (use-package htmlize :ensure t)
+#+end_src
+
+* Emacs Desktop
+** applications
+There is a joke that Emacs is actually an operating system shell on lisp.
+
+These applications are actually desktop-level, BTW I use Emacs.
+
+#+begin_src emacs-lisp
   (use-package citar
     :ensure t
     :init
@@ -2487,88 +2567,6 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     ((my/org-mode LaTeX-mode) . citar-embark-mode)
     )
 
-  ;; play org document as slides
-  (use-package org-tree-slide :ensure t)
-  ;; for better org html output
-  (use-package htmlize :ensure t)
-#+end_src
-
-** org-roam
-Roam builds a note database by inserting a unique ID to your org notes.
-
-#+begin_src emacs-lisp
-  (use-package org-roam
-    :ensure t
-    :defines org-roam-cmd-map
-    :custom
-    (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam")))
-    (org-roam-dailies-directory "dailies/")
-    (org-roam-db-location (file-name-concat org-roam-directory "org-roam.db"))
-    ;; Use FILE-TRUENAME to avoid expansion on this directory
-    (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
-    (org-roam-node-display-template
-     (concat "${title} " (propertize "${tags:30}" 'face 'org-tag)))
-    :init
-    (defvar org-roam-cmd-map (make-sparse-keymap)
-      "A keymap for org-roam related commands.")
-
-    (defun org-roam-consult-grep ()
-      "Grep in org-roam-directory with `consult-grep'."
-      (interactive)
-      (consult-grep org-roam-directory ""))
-    :config
-    (org-roam-db-autosync-mode)
-    :bind-keymap
-    ("C-c n" . org-roam-cmd-map)
-    :bind
-    (:map org-roam-cmd-map
-          ("l" . org-roam-buffer-toggle)
-          ("f" . org-roam-node-find)
-          ("g" . org-roam-consult-grep)
-          ("i" . org-roam-node-insert)
-          ("c" . org-roam-capture)
-          ("j" . org-roam-dailies-capture-today)
-          )
-    )
-
-  (use-package org-roam-ql
-    :ensure t
-    :bind
-    (:map org-roam-cmd-map
-          ("s" . org-roam-ql-search)
-          ("v" . org-roam-ql-buffer-dispatch)
-          )
-    )
-
-  (use-package org-roam-ui
-    :ensure t
-    :diminish
-    ((org-roam-ui-mode . " 󱗿")
-     (org-roam-ui-follow-mode . "  "))
-    :custom
-    (org-roam-ui-open-on-start nil)
-    :bind
-    (:map org-roam-cmd-map
-          ("u" . org-roam-ui-open)
-          ("z" . org-roam-ui-node-zoom)
-          )
-    )
-
-  (use-package org-roam-timestamps
-    :ensure t
-    :diminish org-roam-timestamps-mode
-    :one-off-hook
-    (org-mode . org-roam-timestamps-mode)
-    )
-#+end_src
-
-* Emacs Desktop
-** applications
-There is a joke that Emacs is actually an operating system shell on lisp.
-
-These applications are actually desktop-level, BTW I use Emacs.
-
-#+begin_src emacs-lisp
   (use-package elfeed
     :ensure t
     :commands (elfeed)
@@ -2663,7 +2661,6 @@ These applications are actually desktop-level, BTW I use Emacs.
 
   ;; not configured yet
   (use-package djvu :ensure t)
-  (use-package doc-toc :ensure t)
 #+end_src
 
 ** developer tools
@@ -2682,6 +2679,7 @@ My own packages, you can get them from github with ~vc-use-package~.
     :vc (:url "https://github.com/gynamics/my-misc.el")
     :defer nil
     :bind
+    ("M-#"   . my:mark-whole-line)
     ("M-Q"   . my:unfill-paragraph)
     ("C-x %" . my:eval-and-replace)
     ("C-x 9" . my:dedicate-window-toggle)
@@ -2692,7 +2690,6 @@ My own packages, you can get them from github with ~vc-use-package~.
     :vc (:url "https://github.com/gynamics/semantic-pkg-config.el")
     )
 
-  ;; currently power-mode is broken with vertico
   (use-package railgun
     :vc (:url "https://github.com/gynamics/railgun.el")
     )
@@ -2704,7 +2701,7 @@ My own packages, you can get them from github with ~vc-use-package~.
   (use-package oboe
     :vc (:url "https://github.com/gynamics/oboe.el")
     :init
-    (defun ibuffer-oboe-absorb ()
+    (defun my:ibuffer-oboe-absorb ()
       "Absorb marked buffers into an OBOE temporary buffer."
       (interactive)
       (oboe-absorb (ibuffer-get-marked-buffers)))
@@ -2712,7 +2709,7 @@ My own packages, you can get them from github with ~vc-use-package~.
     (oboe-default-display-method 'popwin:popup-buffer)
     :bind
     (:map ibuffer-mode-map :package ibuffer
-          ("a" . ibuffer-oboe-absorb))
+          ("a" . my:ibuffer-oboe-absorb))
     )
 #+end_src
 
@@ -2737,6 +2734,7 @@ My own packages, you can get them from github with ~vc-use-package~.
     :hook
     (my/prog-mode . buffer-face-mode)
     (my/org-mode . variable-pitch-mode)
+    :bind ("C-c v b" . buffer-face-mode)
     )
 
   (use-package whitespace
@@ -2804,15 +2802,13 @@ My own packages, you can get them from github with ~vc-use-package~.
     ([remap dabbrev-expand]  . hippie-expand)
     ("C-x M-e" . pp-macroexpand-last-sexp)
     ("C-x M-s" . macrostep-mode)
+    ("C-x M-." . xref-find-definitions)
     )
 
   ;; update list of selected packages
   (setq
-   package-selected-packages
-   (append use-package-selected-packages
-           use-package-vc-selected-packages)
-   package-vc-selected-packages
-   use-package-vc-selected-packages)
+   package-selected-packages use-package-selected-packages
+   package-vc-selected-packages use-package-vc-selected-packages)
 
   ;; enable some disabled functions
   (put 'downcase-region 'disabled nil) ;; C-x C-l
