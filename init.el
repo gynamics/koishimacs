@@ -47,19 +47,26 @@
  ;; If there is more than one, they won't work right.
  )
 
-(let ((literate-config (concat user-emacs-directory "koishimacs.org"))
-      (code-config (concat user-emacs-directory "koishimacs.el")))
+(let* ((literate-config (concat user-emacs-directory "koishimacs.org"))
+       (lispcode-config (concat (file-name-sans-extension literate-config) ".el"))
+       (bytecode-config (concat lispcode-config "c")))
   (when (file-exists-p literate-config)
-    ;; If config is pre-compiled and newer, then load it
-    (if (and (file-exists-p code-config)
-             (file-newer-than-file-p code-config literate-config))
-        (load-file code-config)
-      ;; Otherwise use org-babel to tangle the literate configuration
-      (progn
-        ;; do not load any org modules before tangling
-        (defvar org-modules nil)
-        (require 'org)
-        (org-babel-load-file literate-config)))
+    ;; If code config is pre-compiled and newer, then load it
+    ;; Firstly try byte code (.elc)
+    (if (and (file-exists-p bytecode-config)
+             (file-newer-than-file-p bytecode-config literate-config))
+        (load-file bytecode-config)
+      ;; Then try lisp code (.el)
+      (if (and (file-exists-p lispcode-config)
+               (file-newer-than-file-p lispcode-config literate-config))
+          (load-file lispcode-config)
+        ;; Otherwise use org-babel to tangle the literate configuration
+        (progn
+          ;; do not load any org modules before tangling
+          (defvar org-modules nil)
+          (require 'org)
+          ;; do not produce bytecode on the first tangle
+          (org-babel-load-file literate-config))))
     ))
 
 (provide 'init)
