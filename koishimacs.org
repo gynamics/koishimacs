@@ -4,32 +4,6 @@
 #+property: header-args :tangle yes
 
 * Prelude
-** header
-More and more packages, more and more configuration code, it turns to be more and more inconvenient to browse them in a single ~init.el~. However, if we separate them into multiple files, it actually exacerbates the dilemma of loose configuration management.
-
-Therefore we will need a method to organize that large configuration file, both conceptually and visually. Although this could be achieved by a variety of tools in Emacs IDE without bothering the code itself, a more powerful approach is to bring everything into an org document.
-
-This configuration style make use of ~org-babel-load-file~, with ~org-mode~, we can slice these emacs configuration blocks into smaller and smaller code blocks with good document (and all kinds of other information related) attached, which are always well organized in a tree.
-
-This is the header of generated file:
-
-#+begin_src emacs-lisp
-  ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
-
-  ;; Author: gynamics
-  ;; Version: 5.10.0
-
-  ;;; Commentary:
-
-  ;; Koishimacs -- The Emacs in Your Subconsciousness
-  ;; This file is auto-generated from org blocks.
-
-  ;;; Code:
-
-#+end_src
-
-You modifications in org code blocks will not take effect until next startup. If you want some options take effect immediately for further operations (e. g. set ~use-package-deferring-keywords~), you can evaluate them immediately with ~C-x C-e~ (~eval-last-sexp~).
-
 ** preface
 Principles of my Emacs configuration:
 
@@ -45,6 +19,56 @@ so that all packages can be loosely coupled. I just care about if a package can 
 By (3), ~org-mode~ can organize everything for me. I do not need a sparse directory tree with annoying abstract levels, and I can edit this document as efficient as edit a project in an IDE, because lisp is good at process nested structures, and org document itself is a tree.
 
 My main goal is to produce a portable configuration that can be easily ported to a new machine, and then keep iterating with it. If you believe that there will never be an ultimate Emacs configuration for you, then why not embrace this stinging world and enjoy a thorny road?
+
+** header
+More and more packages, more and more configuration code, it turns to be more and more inconvenient to browse them in a single ~init.el~. However, if we separate them into multiple files, it actually exacerbates the dilemma of loose configuration management.
+
+Therefore we will need a method to organize that large configuration file, both conceptually and visually. Although this could be achieved by a variety of tools in Emacs IDE without bothering the code itself, a more powerful approach is to bring everything into an org document.
+
+This configuration style make use of ~org-babel-load-file~, with ~org-mode~, we can slice these emacs configuration blocks into smaller and smaller code blocks with good document (and all kinds of other information related) attached, which are always well organized in a tree.
+
+This is the header of generated file:
+
+#+begin_src emacs-lisp
+  ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
+
+  ;; Author: gynamics
+  ;; Version: 5.11.0
+
+  ;;; Commentary:
+
+  ;; Koishimacs -- The Emacs in Your Subconsciousness
+  ;; This file is auto-generated from org blocks.
+
+  ;;; Code:
+
+  ;; check if current Emacs version supports this configuration
+  (when (< emacs-major-version 30)
+    (error "This Emacs version is not supported"))
+#+end_src
+
+You modifications in org code blocks will not take effect until next startup. If you want some options take effect immediately for further operations (e. g. set ~use-package-deferring-keywords~), you can evaluate them immediately with ~C-x C-e~ (~eval-last-sexp~).
+
+** startup
+Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
+
+BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
+
+#+begin_src emacs-lisp
+  (defun my:tangle-koishimacs:full (byte-compile-p)
+    "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
+  If BYTE-COMPILE-P is given as t, byte compile it."
+    (interactive "P")
+    (let ((source-file (concat user-emacs-directory "koishimacs.org"))
+          (output-file (concat user-emacs-directory "koishimacs.el")))
+      (org-babel-tangle-file source-file output-file)
+      (when byte-compile-p
+        (let ((byte-compile-warnings
+               '(not free-vars unresolved noruntime lexical make-local)))
+          (byte-compile-file output-file)))))
+#+end_src
+
+Early evaluation takes place in the compiling process, this will slightly reduce some work like patching and updating packages. If there happened to be something wrong with a code block, you can add ~:tangle no~ after ~#+begin_src emacs-lisp~ to skip it when compiling, then recompile the configuration file and debug that block manually on next startup.
 
 ** environment
 There are several helpers help create or neglect missing files in initialization. A more generic implementation is expected here (e . g. add ~:depends~ or ~:import~ keywords to ~use-package~, but this seems to be unnecessary)
@@ -80,49 +104,42 @@ There are several helpers help create or neglect missing files in initialization
 However, if we start a subprocess from emacs, it uses environment variables inherited from the parent process of Emacs, which provides ~initial-environment~. To change this, we should modify variable ~exec-path~.
 
 #+begin_src emacs-lisp
-  (require 'cl-lib)
+  (defun my:add-to-env-path (paths)
+    "Add path strings in list PATHS to environment variable $PATH."
+    (let ((env-path (split-string-and-unquote (getenv "PATH") ":")))
+      (setenv "PATH" (mapconcat 'identity (append paths env-path) ":"))))
 
-  (defun my:add-to-env-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to environment variable $PATH."
-    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
-      (dolist (path additional-path-list)
-        (cl-pushnew path env-path-list))
-      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
-
-  (defun my:add-to-exec-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to list var EXEC-PATH."
-    (dolist (path additional-path-list)
-      (add-to-list 'exec-path path)))
-
-  (defun my:add-to-path (additional-path-list)
-    "Add path strings in ADDITIONAL-PATH-LIST to both $PATH and EXEC-PATH."
-    (let ((env-path-list (split-string-and-unquote (getenv "PATH") ":")))
-      (dolist (path additional-path-list)
-        (add-to-list 'exec-path path)
-        (cl-pushnew path env-path-list))
-      (setenv "PATH" (mapconcat 'identity env-path-list ":"))))
+  (defun my:add-to-exec-path (paths)
+    "Add path strings in list PATHS to list var EXEC-PATH."
+    (setf exec-path (append paths exec-path)))
 
   (defun my:strip-list (&rest args)
     "Construct a list with ARGS, remove nils in ARGS."
     (mapcan (lambda (arg) (when arg (list arg))) args))
 
+  (defun my:add-to-path (&rest paths)
+    "Add path string PATHS to both $PATH and EXEC-PATH."
+    (let ((l (apply #'my:strip-list paths)))
+      (when l
+        (my:add-to-env-path l)
+        (my:add-to-exec-path l))))
+
   (let ((home (file-name-as-directory (getenv "HOME"))))
     ;; for some local tools, this should be added to PATH earlier
     (my:add-to-path
-     (my:strip-list
-      (my:weak-directory (concat home ".local/bin"))))
+     (my:weak-directory (concat home ".local/bin")))
 
     ;; add additional paths to PATH as well as exec-path
     (my:add-to-path
-     (my:strip-list  ;; extend the value of EXEC-PATH and $PATH here
-      ;; for haskell
-      (my:weak-directory (concat home ".ghcup/bin"))
-      (my:weak-directory (concat home ".cabal/bin"))
-      ;; for rust
-      (my:weak-directory (concat home ".cargo/bin"))
-      ;; for ruby
-      (when (executable-find "gem")
-        (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\""))))
+     ;; extend the value of EXEC-PATH and $PATH here
+     ;; for haskell
+     (my:weak-directory (concat home ".ghcup/bin"))
+     (my:weak-directory (concat home ".cabal/bin"))
+     ;; for rust
+     (my:weak-directory (concat home ".cargo/bin"))
+     ;; for ruby
+     (when (executable-find "gem")
+       (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\"")))
 
     ;; set additional environment variables
     (mapc
@@ -172,9 +189,10 @@ To accelerate emacs startup we can do:
 1. pacakge quickstart. This feature is provided after emacs 27, which supports compile all loaddefs into one single ~package-quickstart.el~ to avoid openning too much loaddef files. This is enabled in [[file:init.el][init.el]].
 2. lazy loading. This feature can be enabled automatically by setting ~use-package-deferring-keywords~, all configurations with these keywords present will be deferred by default.
 
+Emacs has a severe performance problem when ~load-path~ is a large list, discussed in Emacs bug#41646 and finally solved by adding a cache-based filter for ~load~ in Emacs 31. Before that, the only way to resolve this problem is to explicitly set file path for ~require~, and the path can only be detected automatically on compilation (otherwise we must code them), this is never implemented in koishimacs, because compilation usually brings more problems.
+
 #+begin_src emacs-lisp
   (use-package use-package
-    :defer nil
     :preface
     (defvar use-package-selected-packages nil
       "Packages pulled in by use-package.")
@@ -182,7 +200,7 @@ To accelerate emacs startup we can do:
     (defvar use-package-vc-selected-packages nil
       "Packages pulled in by use-package-vc.")
 
-    :config
+    :init
     (define-advice use-package-handler/:ensure
         (:around (fn name keyword args rest state))
       (dolist (ensure args)
@@ -254,32 +272,7 @@ To accelerate emacs startup we can do:
     ;; set up this to get package loading statistics
     (use-package-compute-statistics t)
     )
-
-  ;; involve this to make use-package find personal-keybindings on compiling
-  ;; (use-package bind-key :demand t)
 #+end_src
-
-Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
-
-BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
-
-#+begin_src emacs-lisp
-  (defun my:regenerate-koishimacs-config (byte-compile-p)
-    "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
-  If BYTE-COMPILE-P is given as t, byte compile it."
-    (interactive "P")
-    (let ((literate-config (concat user-emacs-directory "koishimacs.org"))
-          (code-config (concat user-emacs-directory "koishimacs.el")))
-      (org-babel-tangle-file literate-config code-config)
-      (when byte-compile-p
-        (let ((byte-compile-warnings
-               '(not free-vars unresolved noruntime lexical make-local)))
-          (byte-compile-file code-config)))
-      )
-    )
-#+end_src
-
-Early evaluation takes place in the compiling process, this will slightly reduce some work like patching and updating packages. If there happened to be something wrong with a code block, you can add ~:tangle no~ after ~#+begin_src emacs-lisp~ to skip it when compiling, then recompile the configuration file and debug that block manually on next startup.
 
 With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronous byte-compiling.
 
@@ -300,10 +293,8 @@ With package ~async~ we can use ~async-byte-recompile-directory~ for asynchronou
     )
 #+end_src
 
-** helpers
-This section contains some helper functions and macros.
-
-Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may break elisp bytecompile. So I decided to add decorators to such hooks to avoid direct binding to it.
+** hook decorators
+Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may break elisp bytecompile on bootstraping. So I decided to add decorators to such hooks to avoid direct binding to it.
 
 #+begin_src emacs-lisp
   (defvar my/hook-decorators nil
@@ -353,20 +344,12 @@ still can not set this in ~early-init.el~
 
 #+begin_src emacs-lisp
   (defvar my/load-gui-config-p
-    (or (display-graphic-p) (daemonp)))
+    (or (display-graphic-p) (daemonp))
+    "Indicates whether GUI related config should be loaded.")
 
-  (use-package use-package
-    :preface
-    (defvar my/be-iconic-p (char-displayable-p ?))
-    :config
-    (define-advice use-package-handler/:diminish
-        (:around (orig-fun &rest args))
-      (if my/be-iconic-p
-          (apply orig-fun args)
-        ;; eat keywords without use them
-        (use-package-process-keywords
-          (car args) (nth 4 args) (nth 5 args))))
-    )
+  (defvar my/be-iconic-p t
+    "Indicates whether use unicode icons.
+  Currently we do not have a good way to detect if they're supported.")
 #+end_src
 
 ** color scheme
@@ -374,7 +357,7 @@ A beautiful color scheme is necessary for everyone's eyes.
 
 #+begin_src emacs-lisp
   (use-package koishi-theme
-    :vc (:url "https://github.com/gynamics/koishi-theme.el")
+    :ensure t
     :init
     ;; load a sweet color theme
     ;; currently koishi-theme is not suit for 8-color terminal
@@ -424,7 +407,7 @@ Setup GUI. We can set the initial X window size and position. It is a pity that 
      )
     ;; set default frame title
     (setq-default frame-title-format
-                  (concat "KoishiMACs   👁️   %b   🖊️   " (user-login-name) "@" (system-name)))
+                  (concat "KoishiMACs   👁️   %b   🖌️   " (user-login-name) "@" (system-name)))
     ;; set transparent window for emacs 29+
     (add-to-list 'default-frame-alist '(alpha-background . 80))
     )
@@ -492,16 +475,22 @@ Terminal mode configuration, actually there are very little we can do to the ema
     )
 #+end_src
 
-** be iconic
-~nerd-icons~ provides a basic recipe, and ~diminish~ beautifies the modeline.
+** be iconic.
+~diminish~ can replace minor mode lighters in modeline. It has a keyword integration in ~use-package~ but not part of Emacs, so we need to patch ~use-package~ if it is not available.
 
 #+begin_src emacs-lisp
-  (use-package diminish
-    :ensure t
-    :when my/be-iconic-p
-    :commands (diminish)
-    )
+  (use-package diminish :ensure t :defer nil)
 
+  ;; if diminish is not available, patch the keyword
+  (when (not (featurep 'diminish))
+    (define-advice use-package-handler/:diminish
+        (:around (orig-fun &rest args))
+      (use-package-process-keywords
+        (car args) (nth 4 args) (nth 5 args))))
+#+end_src
+
+~nerd-icons~ provides an awesome icon pack.
+#+begin_src emacs-lisp
   (use-package nerd-icons
     :ensure t
     :defer nil
@@ -741,17 +730,14 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     (setq vertico-multiform-categories
           '((embark-keybinding grid)
             (consult-grep buffer)
-            (org-roam-node buffer indexed)
+            (org-roam-node-find buffer indexed)
             ))
     (vertico-multiform-mode)
 
     :bind
     (:map vertico-map
-          ("C-h" . embark-bindings)     ;; do not override '?'
-          ("TAB" . minibuffer-complete) ;; orig: vertico-insert
-          ("C-<tab>" . vertico-insert)
-          ("C-'" . vertico-quick-jump)
-          ("M-," . vertico-repeat)
+          ("M-j" . vertico-quick-jump)
+          ("M-?" . embark-bindings)      ;; do not override '?'
           )
     )
 
@@ -763,8 +749,14 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
 
   (use-package emacs
     :custom
+    ;; Enable context menu. `vertico-multiform-mode' adds a menu in the minibuffer
+    ;; to switch display modes.
+    (context-menu-mode t)
     ;; Support opening new minibuffers from inside existing minibuffers.
     (enable-recursive-minibuffers t)
+    ;; Do not allow the cursor in the minibuffer prompt
+    (minibuffer-prompt-properties
+     '(read-only t cursor-intangible t face minibuffer-prompt))
     ;; Emacs 28 and newer: Hide commands in M-x which do not work in the current
     ;; mode.  Vertico commands are hidden in normal buffers. This setting is
     ;; useful beyond Vertico.
@@ -772,19 +764,15 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :init
     ;; Add prompt indicator to `completing-read-multiple'.
     ;; We display [CRM<separator>], e.g., [CRM,] if the separator is a comma.
-    (define-advice completing-read-multiple
-        (:filter-args (args) crm-indicator)
-      (cons (format "[CRM%s] %s"
-                    (replace-regexp-in-string
-                     "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
-                     crm-separator)
-                    (car args))
-            (cdr args)))
-
-    ;; Do not allow the cursor in the minibuffer prompt
-    (setq minibuffer-prompt-properties
-          '(read-only t cursor-intangible t face minibuffer-prompt))
-    (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
+    (when (< emacs-major-version 31)
+      (define-advice completing-read-multiple
+          (:filter-args (args) crm-indicator)
+        (cons (format "[CRM%s] %s"
+                      (replace-regexp-in-string
+                       "\\`\\[.*?]\\*\\|\\[.*?]\\*\\'" ""
+                       crm-separator)
+                      (car args))
+              (cdr args))))
     )
 
   (use-package marginalia
@@ -827,8 +815,8 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
      consult-ripgrep consult-git-grep consult-grep
      :preview-key '(:debounce 0.4 any)
      consult-bookmark consult-recent-file consult-xref
-     consult--source-bookmark consult--source-file-register
-     consult--source-recent-file consult--source-project-recent-file
+     consult-source-bookmark consult-source-file-register
+     consult-source-recent-file consult-source-project-recent-file
      :preview-key '("S-<down>" "S-<up>"))
 
     ;; Optionally configure the narrowing key.
@@ -1001,15 +989,9 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
     :bind-keymap
     ("C-z" . popwin:keymap)
     :bind
-    (("C-`" . my:popwin:vterm-toggle)
-     :map popwin:keymap
-     ("C-z" . suspend-emacs)
-     ("b" . my:popwin:ibuffer)
-     ("r" . my:popwin:register-list)
-     ("x" . my:popwin:vterm)
-     ("c" . my:popwin:scratch)
-     ("d" . my:popwin:eldoc)
-     )
+    (:map popwin:keymap
+          ("C-z" . suspend-emacs)
+          ("c" . my:popwin:scratch))
     )
 
   (use-package vterm
@@ -1039,20 +1021,10 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
       (interactive "P")
       (my:popwin:toggle (my:vterm--buffer-name arg)
                         (my:popwin:vterm arg)))
-    )
-
-  ;; use this when vterm is not available
-  (use-package shell
-    :commands (shell)
-    :init
-    (defun my:popwin:shell (&optional arg)
-      "Run shell in a popwin. ARG is passed to shell."
-      (interactive "P")
-      (my:popwin:create "*shell*" (shell arg)))
-
-    (defun my:popwin:shell-toggle (&optional arg)
-      (interactive "P")
-      (my:popwin:toggle "*shell*" (shell arg)))
+    :bind
+    (("C-`" . my:popwin:vterm-toggle)
+     :map popwin:keymap
+     ("x" . my:popwin:vterm))
     )
 
   (use-package ibuffer
@@ -1064,53 +1036,9 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
       (popwin:popup-buffer
        (popwin:get-buffer "*Ibuffer*" :create))
       (ibuffer))
-    )
-
-  (use-package register-list
-    :ensure t
-    :commands (register-list-refresh)
-    :init
-    (defun my:popwin:register-list ()
-      "Show *Register-List* in a popwin, if not exist, create it."
-      (interactive)
-      (popwin:popup-buffer
-       (popwin:get-buffer "*Register List*" :create))
-      (register-list-refresh))
-    )
- #+end_src
-
-** file manager
-Dired is powerful but rough, dirvish polished it.
-
-#+begin_src emacs-lisp
-  (use-package dired
-    :custom
-    (dired-omit-files "\\`[.].*")
     :bind
-    (:map dired-mode-map
-          ("." . dired-omit-mode)
-          ("C-c w" . wdired-change-to-wdired-mode)
-          )
-    )
-
-  (use-package dirvish
-    :ensure t
-    :init
-    (dirvish-override-dired-mode)
-    :custom
-    (dirvish-attributes
-     '(vc-state subtree-state nerd-icons git-msg file-time file-size))
-    :bind
-    (("C-S-e" . dirvish-side)
-     :map dirvish-mode-map
-     ;; <tab> always translates to TAB by default
-     ;; but C-<tab> won't translate to C-TAB
-     ("TAB" . dirvish-subtree-toggle)
-     ("C-<tab>" . dirvish-layout-toggle)
-     ("<" . dirvish-history-last)
-     (">" . dirvish-history-jump)
-     ("?" . dirvish-dispatch)
-     )
+    (:map popwin:keymap
+          ("b" . my:popwin:ibuffer))
     )
 #+end_src
 
@@ -1325,6 +1253,11 @@ A hacker can fly across lines and frames.
      ("C-S-<down>"  . windower-move-border-below)
      )
     )
+
+  (use-package winner
+    :init
+    (winner-mode)
+    )
 #+end_src
 
 ** visualization
@@ -1519,8 +1452,6 @@ Although there are many other code completion frontends today, ~company~ is stil
 
 By default ~company~ uses overlay for display completion options, which has a series of problems. These is a package ~company-box~ which uses child frames, but has some performance problems with documentation display. So, as a tradeoff, currently I don't use child frames and just stay with overlays.
 
-Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disable ~company-fuzzy-mode~ in ~coq-mode~.
-
 #+begin_src emacs-lisp
   (use-package company
     :ensure t
@@ -1545,14 +1476,13 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
        for backend in backends
        for pos = (cl-position ':with backend)
        if pos
-       collect (cl-subseq backend 0 pos) into ctx-aware
-       and collect (cl-subseq backend (1+ pos)) into ctx-agnostic
+       append (cl-subseq backend 0 pos) into ctx-aware
+       and append (cl-subseq backend (1+ pos)) into ctx-agnostic
        else
-       collect (cl-subseq backend 0) into ctx-aware
+       append (cl-subseq backend 0) into ctx-aware
        finally return
        (cl-remove-duplicates
-        (apply #'append
-               (append ctx-aware '((:with)) ctx-agnostic)))))
+        (append ctx-aware (when ctx-agnostic '(:with)) ctx-agnostic))))
 
     (defun my:select-company-backends ()
       (let ((selected
@@ -1605,6 +1535,15 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     :hook (company-quickhelp-mode . company-quickhelp-terminal-mode)
     )
 
+  ;; company-math is a dependency of company-coq, may be useful.
+  (use-package company-math
+    :ensure t
+    :init
+    (add-to-list
+     'my/company-cascade-table
+     '((org-mode TeX-mode) . (company-math-symbols-latex company-latex-commands)))
+    )
+
   (use-package company-coq
     :ensure t
     :diminish company-coq-mode
@@ -1632,14 +1571,22 @@ Currently ~company-coq~ is incompatible with ~company-fuzzy~, so we need to disa
     :init
     (add-to-list
      'my/company-cascade-table
-     '((shell-script-mode . (company-shell company-shell-env))))
+     '(shell-script-mode . (company-shell company-shell-env)))
     )
 
   (use-package slime-company
     :ensure t
+    :custom
+    (slime-company-completion 'fuzzy)
     :hook
-    (slime-mode
-     . (lambda () (slime-setup '(slime-fancy slime-company))))
+    ((slime-mode slime-repl-mode)
+     . (lambda ()
+         (require 'slime-company)
+         (slime-company-init) ;; see issues/11
+         (slime-setup '(slime-fancy slime-company))
+         ;; slime-mode is a minor mode so we can't use `my:select-company-backends'
+         (setq-local company-backends
+                     (list '(company-slime company-dabbrev-code company-files company-yasnippet)))))
     )
 #+end_src
 
@@ -1662,6 +1609,8 @@ They are FANTASTIC!!!
     :when my/load-gui-config-p
     :custom
     (dimmer-mode t)
+    (dimmer-adjustment-mode :background)
+    (dimmer-fraction 0.1)
     (dimmer-exclusion-regexp-list
      '("^ \\*Minibuf-[0-9]+\\*$"
        "^ \\*Echo.*\\*$"
@@ -1685,16 +1634,17 @@ They are FANTASTIC!!!
     (indent-bars-no-descend-lists t) ; no extra bars in continued func arg lists
     (indent-bars-treesit-support t)
     (indent-bars-treesit-ignore-blank-lines-types '("module"))
-    ;; Add other languages as needed
-    (indent-bars-treesit-scope
-     '((python function_definition class_definition for_statement
-               if_statement with_statement while_statement)))
-    ;; Note: wrap may not be needed if no-descend-list is enough
-    ;;(indent-bars-treesit-wrap '((python argument_list parameters ; for python, as an example
-    ;;				      list list_comprehension
-    ;;				      dictionary dictionary_comprehension
-    ;;				      parenthesized_expression subscript)))
-    :hook (my/prog-mode . indent-bars-mode)
+    :hook
+    ;; This zero-delay timer trick makes use of Emacs's single stack model.
+    ;; It will be loaded after all the other hooks of prog-mode are loaded.
+    (my/prog-mode
+     . (lambda ()
+         (run-at-time
+          0 nil
+          (lambda (buf)
+            (when (buffer-live-p buf)
+              (with-current-buffer buf (indent-bars-mode))))
+          (current-buffer))))
     )
 
   (use-package highlight-parentheses
@@ -1720,7 +1670,7 @@ They are FANTASTIC!!!
     :ensure t
     :diminish "  "
     :commands (rainbow-mode)
-    :hook ((sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode) . rainbow-mode)
+    :hook ((emacs-lisp-mode sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode) . rainbow-mode)
     )
 
 #+end_src
@@ -1749,16 +1699,10 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 
   (use-package flycheck-pkg-config
     :ensure t
-    :custom
-    (flycheck-pkg-config-path-vars
-     '(flycheck-clang-include-path
-       flycheck-gcc-include-path
-       flycheck-cppcheck-include-path
-       semantic-c-dependency-system-include-path)
-     )
+    :after (:all flycheck cc-mode)
     :bind
-    (:map flycheck-mode-map
-     ("C-c ! @" . flycheck-pkg-config))
+    (:map flycheck-command-map
+          ("@" . flycheck-pkg-config))
     )
 
   (use-package flymake
@@ -1770,7 +1714,6 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
           ("C-x ! p" . flymake-goto-prev-error)
           ("C-x ! n" . flymake-goto-next-error))
     )
-
 #+end_src
 
 ** code document
@@ -1792,6 +1735,9 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
         (:after (&rest r))
       (with-current-buffer eldoc--doc-buffer
         (keymap-local-set "RET" #'my:eldoc-follow-markdown-link)))
+    :bind
+    (:map popwin:keymap
+          ("d" . my:popwin:eldoc))
     )
 
   (use-package eldoc-box
@@ -1819,7 +1765,9 @@ cedet semantic mode, a sophisticated mode with LL(1) code parser framework.
 
 I like to use it with c/c++, semantic-ia does realtime header parsing, which is really powerful. To make use of all of the IDE features provided by cedet, run ~global-ede-mode~.
 
-#+begin_src emacs-lisp
+Currently, ~semantic-ia~ is broken with ~treesit~, so it's disabled.
+
+#+begin_src emacs-lisp :tangle no
   (use-package semantic
     :custom
     (semantic-idle-truncate-long-summaries nil)
@@ -1922,14 +1870,12 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
 
   ;; We may enable some built-in treesit modes directly to be lazy
   (use-package treesit
-    :autoload (treesit-ready-p)
     :custom
     (treesit-font-lock-level 4) ;; as colorful as possible
     :init
     (defun my:auto-ts-mode (language regexp &optional func)
-      (when (treesit-ready-p language t)
-        (add-to-list 'auto-mode-alist
-                     `(,regexp . ,(or func (intern (concat (symbol-name language) "-ts-mode")))))))
+      (add-to-list 'auto-mode-alist
+                   `(,regexp . ,(or func (intern (concat (symbol-name language) "-ts-mode"))))))
 
     (mapc
      (lambda (conf) (apply #'my:auto-ts-mode conf))
@@ -1985,7 +1931,9 @@ With this package we can also prettify the c macro expansion, which is not prett
 #+end_src
 
 ** project management
-Since Emacs 28, Emacs has integrated ~project.el~ for project management. So we don't need projectile anymore. ~projection~ provides specific support for different types of projects.
+Since Emacs 28, Emacs has integrated ~project.el~ for project management (its keymap is bound to ~C-x p~ by default). So we don't need projectile anymore. ~projection~ provides specific support for different types of projects.
+
+~git~ is the most popular version control tool, and ~magit~ provides the best interface for it.
 
 #+begin_src emacs-lisp
   (use-package projection
@@ -2005,29 +1953,33 @@ Since Emacs 28, Emacs has integrated ~project.el~ for project management. So we 
     (:map projection-map
           ("RET" . projection-multi-compile))
     )
-#+end_src
 
-Git is the most popular version control tool, and ~magit~ provides the Emacs interface of it.
+  ;; trigger bind to `C-x g' by default
+  (use-package magit :ensure t)
 
-#+begin_src emacs-lisp
-  (use-package magit
-    :ensure t
-    :bind
-    (:map magit-mode-map ;; this needs to be overridden
-     ("M-1" . windower-toggle-single)
-     ("M-2" . windower-toggle-split)
-     )
-    )
-#+end_src
-
-License is necessary for your open-source projects
-#+begin_src emacs-lisp
+  ;; License is necessary for your open-source projects
   (use-package lice :ensure t)
   (use-package spdx :ensure t)
 #+end_src
 
-Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++ compilation, but it is not actively maintained, and depends on a ~.project~ file which is not that convenient.
+** debugger
+It is not a fashionable thing to debug in Emacs, most modern IDEs integrates their own debugger. However, that does not mean Emacs is not good at do that. Emacs has GUD (Generic Unified Debugger) as a frontend, which supports many debuggers, especially GDB.
+
 #+begin_src emacs-lisp
+  (use-package gud :diminish (gud-mode . " "))
+#+end_src
+
+Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, which is a heavy framework on Elisp.  ~dape~ uses more built-in features for integration.
+
+#+begin_src emacs-lisp
+  (use-package dape :ensure t)
+#+end_src
+
+** language-specific supports
+Most of them are not configured and deferred.
+
+#+begin_src emacs-lisp
+  ;; simple configuration for C/C++ build and debug.
   (use-package emacs
     :hook
     ((c-mode c++-mode)
@@ -2042,34 +1994,17 @@ Fast C/C++ code compilation. Actually, ede already provides a solution for C/C++
                   ;; $(CC) -c -o $@ $(CPPFLAGS) $(CFLAGS) $<
                   (format "%s -o %s %s %s %s"
                           (or (getenv "CC") "gcc")
-                          (file-name-sans-extension file)
+                          (if (file-name-extension file)
+                              (file-name-sans-extension file)
+                            (concat file ".out"))
                           (or (getenv "CPPFLAGS") "-DDEBUG=9")
                           (or (getenv "CFLAGS") "-Wall -g")
                           file))
-             (set (make-local-variable 'gud-gud-gdb-command-name)
-                  (format "gdb --fullname %s"
-                          (file-name-sans-extension file)))
              ))
          (keymap-local-set "C-c C-r" #'compile)
          (keymap-local-set "C-c C-d" #'gud-gdb)))
     )
 
-  (use-package gud :diminish (gud-mode . " "))
-#+end_src
-
-** debugger
-It is not a fashionable thing to debug in Emacs, most modern IDEs integrates their own debugger. However, that does not mean Emacs is not good at do that. Emacs has good support for many debuggers, especially GDB.
-
-Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, and ~dape~ is something flyweight.
-
-#+begin_src emacs-lisp
-  (use-package dape :ensure t)
-#+end_src
-
-** language-specific supports
-Most of them are not configured and deferred.
-
-#+begin_src emacs-lisp
   (use-package tex
     :ensure auctex
     :config
@@ -2086,6 +2021,11 @@ Most of them are not configured and deferred.
 
   (use-package lilypond-mode
     :mode ("\\.i?ly\\'" . LilyPond-mode)
+    :custom
+    ;; LilyPond does not support live preview, for live preview,
+    ;; run the reader independently if it supports realtime updating.
+    (LilyPond-ps-command "okular")
+    (LilyPond-pdf-command "okular")
     )
 
   (use-package sclang
@@ -2142,6 +2082,10 @@ Most of them are not configured and deferred.
     :diminish (slime-mode . " Ϛむ")
     :custom
     (slime-autodoc-mode-string " Ϛi")
+    :hook
+    ;; EWW is enough for reading CommonLisp HyperSpec
+    ((sldb-mode slime-mode slime-repl-mode)
+     . (lambda () (setq-local browse-url-browser-function #'eww-browse-url)))
     )
 
   (use-package slime-repl-ansi-color
@@ -2169,7 +2113,7 @@ Most of them are not configured and deferred.
 
   (use-package geiser
     :ensure t
-    :defines (my:geiser-file-path)
+    :defines my:geiser-file-path
     :preface
     (defun my:geiser-file-path (name)
       (file-name-concat
@@ -2198,11 +2142,6 @@ Most of them are not configured and deferred.
     :ensure t
     :custom
     (plantuml-default-exec-mode 'executable)
-    )
-
-  (use-package adoc-mode
-    :ensure t
-    :mode ("\\.adoc\\'" . adoc-mode)
     )
 
   (use-package web-mode
@@ -2416,7 +2355,10 @@ Roam builds a note database by inserting a unique ID to your org notes.
     ;; Use FILE-TRUENAME to avoid expansion on this directory
     (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
     (org-roam-node-display-template
-     (concat "${title} " (propertize "${tags:30}" 'face 'org-tag)))
+     (concat "${title} "
+             (propertize "${tags}" 'face 'org-tag)
+             (propertize " " 'display `((space :align-to (- right-fringe 20))))
+             (propertize "${file-title}" 'face 'org-document-info)))
     :init
     (defvar org-roam-cmd-map (make-sparse-keymap)
       "A keymap for org-roam related commands.")
@@ -2447,6 +2389,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
           ("s" . org-roam-ql-search)
           ("v" . org-roam-ql-buffer-dispatch)
           )
+    :hook (org-roam-ql-mode . visual-line-mode)
     )
 
   (use-package org-roam-ui
@@ -2495,11 +2438,6 @@ Other extensions that are helpful in ~org-mode~.
     :hook (my/org-mode . org-fragtog-mode)
     )
 
-  (use-package org-edit-indirect
-    :ensure t
-    :hook (my/org-mode . org-edit-indirect-mode)
-    )
-
   (use-package org-download
     :ensure t
     :config
@@ -2543,6 +2481,27 @@ There is a joke that Emacs is actually an operating system shell on lisp.
 These applications are actually desktop-level, BTW I use Emacs.
 
 #+begin_src emacs-lisp
+  (use-package dirvish
+    :ensure t
+    :init
+    (dirvish-override-dired-mode)
+    :custom
+    (dirvish-attributes
+     '(vc-state subtree-state nerd-icons git-msg file-time file-size))
+    :bind
+    (("C-S-e" . dirvish-side)
+     :map dirvish-mode-map
+     ;; <tab> always translates to TAB by default
+     ;; but C-<tab> won't translate to C-TAB
+     ("TAB" . dirvish-subtree-toggle)
+     ("C-<tab>" . dirvish-layout-toggle)
+     ("<" . dirvish-history-last)
+     (">" . dirvish-history-jump)
+     ("?" . dirvish-dispatch)
+     ("/" . dirvish-narrow)
+     )
+    )
+
   (use-package citar
     :ensure t
     :init
@@ -2666,9 +2625,34 @@ These applications are actually desktop-level, BTW I use Emacs.
 ** developer tools
 Tools for Emacs development.
 
-#+begin_src emacs-lisp
-  ;; currently there is nothing
+You may disable this block if you are not ready to be deliver packages to community.
 
+#+begin_src emacs-lisp
+  (use-package package-lint
+    :ensure t
+    :autoload (package-lint-buffer)
+    :init
+    (defun my:pacakge-lint-file (&optional filename)
+      "Display lint errors and warnings for a file of FILENAME."
+      (interactive
+       (list (or (buffer-file-name)
+                 (read-file-name "Lint file: "))))
+      (let ((errs (package-lint-buffer (find-file filename)))
+            (buf "*Package-Lint*"))
+        (with-current-buffer (get-buffer-create buf)
+          (let ((buffer-read-only nil))
+            (erase-buffer)
+            (cond
+             ((null errs) (insert "No issues found."))
+             ((null (cdr errs)) (insert "1 issue found:\n\n"))
+             (t (insert (format "%d issues found:\n\n" (length errs)))))
+            (pcase-dolist (`(,line ,col ,type ,message) errs)
+              (insert (format "%s:%d:%d: %s: %s\n" filename line col type message))))
+          (compilation-mode buf))
+        (display-buffer buf)))
+    )
+
+  (use-package package-build :ensure t)
 #+end_src
 
 * Epilogue
@@ -2696,6 +2680,10 @@ My own packages, you can get them from github with ~vc-use-package~.
 
   (use-package toc-glue
     :vc (:url "https://github.com/gynamics/toc-glue.el")
+    :mode
+    ("\\.toc\\'" . toc-mode)
+    ("\\.bm.lisp\\'" . toc-glue-mode)
+    ("\\.djvubm.lisp\\'" . toc-glue-djvu-mode)
     )
 
   (use-package oboe
