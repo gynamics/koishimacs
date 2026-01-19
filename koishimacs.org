@@ -33,7 +33,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.11.0
+  ;; Version: 5.11.1
 
   ;;; Commentary:
 
@@ -52,7 +52,7 @@ You modifications in org code blocks will not take effect until next startup. If
 ** startup
 Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
 
-BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
+BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style. Emacs Lisp does not support Common Lisp style modules, this naming style is rejected by ~package-lint~, but personal configuration is a terminal of packages, so let's be free here.
 
 #+begin_src emacs-lisp
   (defun my:tangle-koishimacs:full (byte-compile-p)
@@ -149,6 +149,7 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
       (when (file-directory-p (concat home ".go"))
         `("GOPATH" ,(concat home ".go")))
       ;; proxy (if you have one)
+      '("no_proxy" "localhost,127.0.0.1")
       '("http_proxy" "http://127.0.0.1:2080")
       '("https_proxy" "http://127.0.0.1:2080")
       '("ALL_PROXY" "socks5://127.0.0.1:2080")))
@@ -784,7 +785,6 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :ensure t
     ;; The :init configuration is always executed (Not lazy)
     :init
-
     ;; Optionally configure the register formatting. This improves the register
     ;; preview for `consult-register', `consult-register-load',
     ;; `consult-register-store' and the Emacs built-ins.
@@ -1298,8 +1298,6 @@ More previews and visual feedback.
     :ensure t
     :init
     (require 'vlf-setup)
-    :custom
-    (vlf-application 'dont-ask)
     )
 
 #+end_src
@@ -1607,6 +1605,9 @@ They are FANTASTIC!!!
   (use-package dimmer
     :ensure t
     :when my/load-gui-config-p
+    :init
+    (defun my:pdf-view-mode-p ()
+      (bound-and-true-p pdf-view-mode))
     :custom
     (dimmer-mode t)
     (dimmer-adjustment-mode :background)
@@ -1615,6 +1616,8 @@ They are FANTASTIC!!!
      '("^ \\*Minibuf-[0-9]+\\*$"
        "^ \\*Echo.*\\*$"
        "^ \\*Embark Actions\\*$"))
+    (dimmer-prevent-dimming-predicates
+     '(window-minibuffer-p my:pdf-view-mode-p))
     )
 
   (use-package fancy-compilation
@@ -2194,6 +2197,15 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      (concat mail-default-directory ".signature"))
     )
 
+  ;; you need to put your mail user authentication information in `auth-source'.
+  (use-package smtpmail
+    :custom
+    (smtpmail-smtp-user "gynamic")
+    (smtpmail-smtp-server "mail.coldbench.top")
+    (smtpmail-smtp-service 587)
+    (smtpmail-stream-type 'starttls)
+    )
+
   (use-package gnus
     :commands (gnus)
     :custom
@@ -2203,8 +2215,16 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      (concat gnus-home-directory "News/"))
     (mail-source-directory message-directory)
     (smime-certificate-directory (concat message-directory "certs/"))
+    (user-full-name "gynamics")
+    (user-mail-address "gynamics@coldbench.top")
     :config
     (setq gnus-select-method '(nntp "news.gmane.io"))
+    (setq gnus-secondary-select-methods
+          '((nnimap "coldbench.top"
+                    (nnimap-address "mail.coldbench.top")
+                    (nnimap-server-port 993)
+                    (nnimap-stream tls)
+                    (nnimap-inbox "INBOX"))))
     )
 
   (use-package org
@@ -2350,7 +2370,6 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :defines org-roam-cmd-map
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam/")))
-    (org-roam-dailies-directory "dailies/")
     (org-roam-db-location (file-name-concat org-roam-directory "org-roam.db"))
     ;; Use FILE-TRUENAME to avoid expansion on this directory
     (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
@@ -2360,13 +2379,16 @@ Roam builds a note database by inserting a unique ID to your org notes.
              (propertize " " 'display `((space :align-to (- right-fringe 20))))
              (propertize "${file-title}" 'face 'org-document-info)))
     :init
+    (setq org-roam-dailies-directory "dailies/")
+
     (defvar org-roam-cmd-map (make-sparse-keymap)
       "A keymap for org-roam related commands.")
 
     (defun my:org-roam-consult-grep ()
       "Grep in org-roam-directory with `consult-grep'."
       (interactive)
-      (consult-grep org-roam-directory ""))
+      (dlet ((grep-find-ignored-directories (list "ltximg/")))
+        (consult-grep org-roam-directory "")))
     :config
     (org-roam-db-autosync-mode)
     :bind-keymap
@@ -2384,6 +2406,18 @@ Roam builds a note database by inserting a unique ID to your org notes.
 
   (use-package org-roam-ql
     :ensure t
+    :config
+    (setq org-roam-ql-preview-function
+          (lambda (node _)
+            (if (= (org-roam-node-level node) 0)
+                ;; if it is at top level, insert all its content
+                (let ((beg (save-excursion
+                             (org-roam-end-of-meta-data t)
+                             (point)))
+                      (end (point-max)))
+                  (string-trim (buffer-substring-no-properties beg end)))
+              ;; otherwise simply call the default function.
+              (funcal org-roam-preview-function))))
     :bind
     (:map org-roam-cmd-map
           ("s" . org-roam-ql-search)
@@ -2542,6 +2576,48 @@ These applications are actually desktop-level, BTW I use Emacs.
      )
     )
 
+  (use-package ellama
+    :ensure t
+    :bind ("C-c e" . ellama)
+    :init
+    (setopt ellama-auto-scroll t)
+    (setopt ellama-language "Chinese")
+    (require 'llm-ollama)
+    ;; Here we use Qwen3-30B-A3B MoE model with default configuration.
+    (setopt ellama-provider
+            (make-llm-ollama
+  	   ;; this model should be pulled to use it
+  	   ;; value should be the same as you print in terminal during pull
+  	   :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+             :embedding-model "qwen3-embedding:latest"
+  	   :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-summarization-provider
+  	  (make-llm-ollama
+  	   :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+  	   :embedding-model "qwen3-embedding:latest"
+  	   :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-coding-provider
+  	  (make-llm-ollama
+  	   :chat-model "qwen3-coder:latest"
+  	   :embedding-model "qwen3-embedding:latest"
+  	   :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-translation-provider
+  	  (make-llm-ollama
+  	   :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+  	   :embedding-model "qwen3-embedding:latest"
+  	   :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-extraction-provider
+            (make-llm-ollama
+  	   :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+  	   :embedding-model "qwen3-embedding:latest"
+  	   :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    :config
+    ;; show ellama context in header line in all buffers
+    (ellama-context-header-line-global-mode +1)
+    ;; show ellama session id in header line in all buffers
+    (ellama-session-header-line-global-mode +1)
+    )
+
   (use-package gt
     :ensure t
     :autoload (gt-start
@@ -2611,6 +2687,11 @@ These applications are actually desktop-level, BTW I use Emacs.
     :ensure t
     :init
     (pdf-loader-install)
+    :hook
+    (pdf-view-mode . pdf-view-roll-minor-mode)
+    ;; support display page number in violet line
+    (pdf-view-mode
+     . (lambda () (setq violet-line-position mode-line-position)))
     )
 
   (use-package nov
@@ -2662,12 +2743,14 @@ My own packages, you can get them from github with ~vc-use-package~.
   (use-package my-misc
     :vc (:url "https://github.com/gynamics/my-misc.el")
     :defer nil
+    :init
+    (defalias 'my:asset-directory 'my-misc-asset-directory)
     :bind
-    ("M-#"   . my:mark-whole-line)
-    ("M-Q"   . my:unfill-paragraph)
-    ("C-x %" . my:eval-and-replace)
-    ("C-x 9" . my:dedicate-window-toggle)
-    ("<f9>"  . my:adjust-alpha-background)
+    ("M-#"   . my-misc-mark-whole-line)
+    ("M-Q"   . my-misc-unfill-paragraph)
+    ("C-x %" . my-misc-eval-and-replace)
+    ("C-x 9" . my-misc-dedicate-window-toggle)
+    ("<f9>"  . my-misc-adjust-alpha-background)
     )
 
   (use-package semantic-pkg-config
@@ -2681,9 +2764,9 @@ My own packages, you can get them from github with ~vc-use-package~.
   (use-package toc-glue
     :vc (:url "https://github.com/gynamics/toc-glue.el")
     :mode
-    ("\\.toc\\'" . toc-mode)
-    ("\\.bm.lisp\\'" . toc-glue-mode)
-    ("\\.djvubm.lisp\\'" . toc-glue-djvu-mode)
+    ("\\.toc\\'" . toc-glue-toc-mode)
+    ("\\.sbm.el\\'" . toc-glue-mode)
+    ("\\.bm.el\\'" . toc-glue-djvu-mode)
     )
 
   (use-package oboe
