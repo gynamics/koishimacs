@@ -33,7 +33,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.11.0
+  ;; Version: 5.11.1
 
   ;;; Commentary:
 
@@ -52,7 +52,7 @@ You modifications in org code blocks will not take effect until next startup. If
 ** startup
 Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file, because ~org-babel-tangle-file~ will take a little bit of time to tangle a series of blocks. You can then compile this file, but that doesn't matter performance.
 
-BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style.
+BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style. Emacs Lisp does not support Common Lisp style modules, this naming style is rejected by ~package-lint~, but personal configuration is a terminal of packages, so let's be free here.
 
 #+begin_src emacs-lisp
   (defun my:tangle-koishimacs:full (byte-compile-p)
@@ -75,7 +75,8 @@ There are several helpers help create or neglect missing files in initialization
 
 #+begin_src emacs-lisp
   (defun my:strong-directory (dir &optional parents)
-    "Return DIR, if it does not exist, try to create it."
+    "Return DIR, if it does not exist, try to create it.
+  If it is a relative path, create it under path PARENTS."
     (if (file-directory-p dir)
         dir
       (condition-case nil
@@ -149,6 +150,7 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
       (when (file-directory-p (concat home ".go"))
         `("GOPATH" ,(concat home ".go")))
       ;; proxy (if you have one)
+      '("no_proxy" "localhost,127.0.0.1")
       '("http_proxy" "http://127.0.0.1:2080")
       '("https_proxy" "http://127.0.0.1:2080")
       '("ALL_PROXY" "socks5://127.0.0.1:2080")))
@@ -160,14 +162,12 @@ As for package configuration, we will use ~use-package.el~, which provides conve
 
 #+begin_src emacs-lisp
   ;; detect native-compile feature
-  (if (and (featurep 'native-compile)
-           (fboundp 'native-comp-available-p)
-           (native-comp-available-p))
-      ;; Activate `native-compile'
-      (setq native-comp-jit-compilation t
-            package-native-compile t)
-    ;; Deactivate the `native-compile' feature if it is not available
-    (setq features (delq 'native-compile features)))
+  (when (and (featurep 'native-compile)
+             (fboundp 'native-comp-available-p)
+             (native-comp-available-p))
+    ;; Activate `native-compile'
+    (setq native-comp-jit-compilation t
+          package-native-compile t))
 
   ;; pick up a fast ELPA mirror for package.el
   (custom-set-variables
@@ -245,23 +245,23 @@ Emacs has a severe performance problem when ~load-path~ is a large list, discuss
       "Handler for the `:one-off-hook` keyword in `use-package'."
       (use-package-concat
        (use-package-process-keywords name rest state)
-       (cl-mapcan
-        #'(lambda (def)
-            (let ((syms (car def))
-                  (fun (cdr def)))
-              (when fun
-                (mapcar
-                 #'(lambda (sym)
-                     (let ((symname (symbol-name sym)))
-                       (if (and (boundp sym)
-                                ;; Mode variables are usually bound, but
-                                ;; their hooks are named FOO-mode-hook.
-                                (not (string-suffix-p "-mode" symname)))
-                           `(my:one-off-hook ',sym #',fun)
-                         `(my:one-off-hook
-                           ',(intern (concat symname use-package-hook-name-suffix))
-                           #',fun))))
-                 (use-package-hook-handler-normalize-mode-symbols syms)))))
+       (mapcan
+        (lambda (def)
+          (let ((syms (car def))
+                (fun (cdr def)))
+            (when fun
+              (mapcar
+               (lambda (sym)
+                 (let ((symname (symbol-name sym)))
+                   (if (and (boundp sym)
+                            ;; Mode variables are usually bound, but
+                            ;; their hooks are named FOO-mode-hook.
+                            (not (string-suffix-p "-mode" symname)))
+                       `(my:one-off-hook ',sym #',fun)
+                     `(my:one-off-hook
+                       ',(intern (concat symname use-package-hook-name-suffix))
+                       #',fun))))
+               (use-package-hook-handler-normalize-mode-symbols syms)))))
         (use-package-normalize-commands args))))
 
     (setq use-package-keywords (cons ':one-off-hook use-package-keywords))
@@ -524,7 +524,8 @@ Terminal mode configuration, actually there are very little we can do to the ema
           path
         (let* ((comp (file-name-split path))
                (base (car (last comp)))
-               (dirs (cl-remove-if #'string-empty-p (butlast comp)))
+               (dirs (mapcan (lambda (s) (unless (string-empty-p s) (list s)))
+                             (butlast comp)))
                (shrinked-dirs (mapconcat (lambda (dir)
                                            (substring dir 0 1))
                                          dirs "/"))
@@ -784,7 +785,6 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
     :ensure t
     ;; The :init configuration is always executed (Not lazy)
     :init
-
     ;; Optionally configure the register formatting. This improves the register
     ;; preview for `consult-register', `consult-register-load',
     ;; `consult-register-store' and the Emacs built-ins.
@@ -1222,12 +1222,9 @@ A hacker can fly across lines and frames.
   (use-package avy
     :ensure t
     :bind
-    ;; M-g bindings in `goto-map'
-    ("M-g f" . avy-goto-char)
-    ("M-g v" . avy-goto-char-2)
-    ("M-g l" . avy-goto-line)
-    ("M-g w" . avy-goto-word-0)
-    ("M-g e" . avy-goto-word-1)
+    ("C-c C-j" . avy-resume)
+    (:map isearch-mode-map
+          ("M-j" . avy-isearch))
     )
 
   (use-package windmove
@@ -1242,8 +1239,6 @@ A hacker can fly across lines and frames.
 
   (use-package windower
     :ensure t
-    :autoload (windower-toggle-single
-               windower-toggle-split)
     :bind
     (("M-1" . windower-toggle-single)
      ("M-2" . windower-toggle-split)
@@ -1298,8 +1293,6 @@ More previews and visual feedback.
     :ensure t
     :init
     (require 'vlf-setup)
-    :custom
-    (vlf-application 'dont-ask)
     )
 
 #+end_src
@@ -1607,6 +1600,9 @@ They are FANTASTIC!!!
   (use-package dimmer
     :ensure t
     :when my/load-gui-config-p
+    :init
+    (defun my:pdf-view-mode-p ()
+      (bound-and-true-p pdf-view-mode))
     :custom
     (dimmer-mode t)
     (dimmer-adjustment-mode :background)
@@ -1615,6 +1611,8 @@ They are FANTASTIC!!!
      '("^ \\*Minibuf-[0-9]+\\*$"
        "^ \\*Echo.*\\*$"
        "^ \\*Embark Actions\\*$"))
+    (dimmer-prevent-dimming-predicates
+     '(window-minibuffer-p my:pdf-view-mode-p))
     )
 
   (use-package fancy-compilation
@@ -1657,7 +1655,7 @@ They are FANTASTIC!!!
 
   (use-package paren
     :custom (show-paren-style 'mixed)
-    :custom-face (show-paren-match-expression ((t (:inherit t :background "#554565"))))
+    :custom-face (show-paren-match-expression ((t (:inherit 'unspecified :background "#554565"))))
     :hook (my/prog-mode . show-paren-mode)
     )
 
@@ -1670,7 +1668,7 @@ They are FANTASTIC!!!
     :ensure t
     :diminish "  "
     :commands (rainbow-mode)
-    :hook ((emacs-lisp-mode sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode) . rainbow-mode)
+    :hook ((emacs-lisp-mode sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode web-mode) . rainbow-mode)
     )
 
 #+end_src
@@ -1979,6 +1977,44 @@ Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, which is a 
 Most of them are not configured and deferred.
 
 #+begin_src emacs-lisp
+  ;; c-ts-mode has a rough indentation setting compared to cc-mode
+  ;; currently let's add a helper for setting styles
+  (use-package c-ts-mode
+    :commands (c-ts-set-style)
+    :config
+    (require 'cc-mode)
+    (defun c-ts-set-style (&optional style)
+      (interactive (list (completing-read "Set to style: " c-style-alist)))
+      ;; detect file mode with cc-mode
+      (if style
+          (progn
+            (if (member (intern style) '(gnu k&r bsd linux))
+                (c-ts-mode-set-style style)
+              (c-set-style style))
+            (setq-local c-ts-mode-indent-offset
+                        (assoc 'c-basic-offset (assoc style c-style-alist))))
+        (unless (bound-and-true-p c-ts-set-style--reentry)
+  	(if (save-excursion
+  	      (save-restriction
+  		(save-match-data
+  		  (widen)
+  		  (goto-char (point-min))
+  		  (re-search-forward c-or-c++-mode--regexp
+  				     (+ (point) c-guess-region-max) t))))
+  	    (c++-mode)
+  	  (c-mode))
+          (c-guess-buffer)
+          ;; masking this function to recover ts mode
+          (dlet ((c-ts-set-style--reentry t))
+            (c-or-c++-mode))
+          (setq-local c-ts-mode-indent-offset c-guess-guessed-basic-offset)))
+      ;; refresh indent bars
+      (when (bound-and-true-p indent-bars-mode)
+        (indent-bars-reset)))
+    :hook
+    ((c-ts-mode c++-ts-mode) . c-ts-set-style)
+    )
+
   ;; simple configuration for C/C++ build and debug.
   (use-package emacs
     :hook
@@ -2174,12 +2210,12 @@ Most of them are not configured and deferred.
 #+end_src
 
 * Org Editor
-** org-mode
-It is really interesting to write ~org-mode~ configurations in an org document.
+** gnus
+Org will load rmail and gnus when loading modules, so the configuration of these modules must be placed before org.
+
+It is not that fashionable to send and read mails in Emacs, but it just has such a facility.
 
 #+begin_src emacs-lisp
-  ;; org will load rmail and gnus when loading modules,
-  ;; so the configuration of these modules must be placed before org.
   (use-package message
     :custom
     (message-directory
@@ -2194,6 +2230,15 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      (concat mail-default-directory ".signature"))
     )
 
+  ;; you need to put your mail user authentication information in `auth-source'.
+  (use-package smtpmail
+    :custom
+    (smtpmail-smtp-user "gynamic")
+    (smtpmail-smtp-server "mail.coldbench.top")
+    (smtpmail-smtp-service 587)
+    (smtpmail-stream-type 'starttls)
+    )
+
   (use-package gnus
     :commands (gnus)
     :custom
@@ -2203,10 +2248,23 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      (concat gnus-home-directory "News/"))
     (mail-source-directory message-directory)
     (smime-certificate-directory (concat message-directory "certs/"))
+    (user-full-name "gynamics")
+    (user-mail-address "gynamics@coldbench.top")
     :config
     (setq gnus-select-method '(nntp "news.gmane.io"))
+    (setq gnus-secondary-select-methods
+          '((nnimap "coldbench.top"
+                    (nnimap-address "mail.coldbench.top")
+                    (nnimap-server-port 993)
+                    (nnimap-stream tls)
+                    (nnimap-inbox "INBOX"))))
     )
+#+end_src
 
+** org-mode
+It is really interesting to write ~org-mode~ configurations in an org document.
+
+#+begin_src emacs-lisp
   (use-package org
     :autoload (org-babel-tangle-file)
     :defines org-mode-map
@@ -2235,6 +2293,7 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      (if (executable-find "latexmk")
          '("latexmk -shell-escape -bibtex -f -pdf -%latex -interaction=nonstopmode -output-directory=%o %f")
        '("pdflatex -shell-escape -interaction nonstopmode -output-directory %o %f")))
+    (org-ditaa-jar-path "/usr/share/java/ditaa/ditaa-0.11.jar")
     (org-plantuml-jar-path "/usr/share/java/plantuml/plantuml.jar")
     (org-pretty-entities t)
     (org-pretty-entities-include-sub-superscripts nil)
@@ -2341,6 +2400,171 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     )
 #+end_src
 
+** publish
+Here is a minimal web publish scaffold. I use ~org-html~ to generate html posts of my essays. I don't want a static site generator, neither a runtime-generated site. It only provides tools for exporting current org file to html in a directory for post.
+
+Resource files are written by myself, not shipped with koishimacs.
+
+#+begin_src emacs-lisp
+  (use-package ox
+    :commands (my:blog-sitemap-update my:blog-rsync my:org-blog-post)
+    :config
+    (defvar my/org-blog-link "https://gynamics.top")
+    (defvar my/org-blog-dir "/wsp/edu/gynamics.top/")
+    (defvar my/org-blog-post-prefix "posts/")
+    (defvar my/org-blog-js-prefix "js/")
+    (defvar my/org-blog-rsrc-prefix "resources/")
+    (defvar my/org-blog-rss-title "Gynamics' Blog Posts")
+    (defvar my/org-blog-rss-desc "Hello, world!")
+    (defvar my/org-blog-head
+      (format (concat "<div id=\"head-container\">Hello, world!</div>"
+                      "<script src=\"%s\"></script>")
+              (file-name-concat "/" my/org-blog-js-prefix "head-container.js")))
+    (defvar my/org-blog-tail
+      (format (concat "<div id=\"tail-container\">&copy 2026 gynamics</div>"
+                      "<script src=\"%s\"></script>")
+              (file-name-concat "/" my/org-blog-js-prefix "tail-container.js")))
+
+    (autoload 'json-read-file "json")
+    (defun my:blog-index-update (key &optional title date tags)
+      "Update item in index.json with KEY, set its value with TITLE, DATE, TAGS."
+      (let* ((f (file-name-concat
+                 my/org-blog-dir my/org-blog-post-prefix "index.json"))
+             (h (dlet ((json-object-type 'hash-table))
+                  (if (file-exists-p f)
+                      (json-read-file f)
+                    (make-hash-table)))))
+        (setf (gethash key h)
+              `((title . ,title)
+                ;; rfc7321 time format
+                (date . ,(format-time-string "%a, %d %b %Y %T %z" date))
+                (tags . ,(vconcat tags))))
+        (with-temp-file f (json-insert h))))
+
+    (defun my:blog-sitemap-update ()
+      "Update sitemap.html according to index.json."
+      (interactive)
+      (let* ((f (file-name-concat
+                 my/org-blog-dir my/org-blog-post-prefix "index.json"))
+             (data))
+        (maphash
+         (lambda (k v)
+           (push
+            (list
+             (apply #'encode-time (parse-time-string (gethash "date" v)))
+             "<li class=\"item\">"
+             (format "<a href=\"posts/%s\">%s</a>"
+                     k (gethash "title" v))
+             (format "<span class=\"tag-list\"> &nbsp; %s &nbsp; </span>"
+                     (mapconcat
+                      (lambda (tag)
+                        (format "<span class=\"tag\" onclick=\"toggleTag('%s')\">#%s</span>"
+                                tag tag))
+                      (gethash "tags" v)
+                      ""))
+             (format "<span class=\"timestamp item-date\">%s</span>"
+                     (gethash "date" v))
+             "</li>\n")
+            data))
+         (dlet ((json-object-type 'hash-table))
+           (if (file-exists-p f)
+               (json-read-file f)
+             (make-hash-table))))
+        (with-temp-buffer
+          (insert-file-contents
+           (file-name-concat my/org-blog-dir "templates/sitemap.html"))
+          (goto-char (point-min))
+          (search-forward "<!-- Items -->\n")
+          (mapc
+           (lambda (l) (apply #'insert (cdr l)))
+           (sort data :key #'car :reverse t))
+          (write-file (file-name-concat my/org-blog-dir "sitemap.html")))))
+
+    (defun my:blog-rss-update (key title date tags)
+      "Update the RSS item with KEY, set its value with TITLE, DATE, TAGS."
+      (let ((rss-file (file-name-concat
+                       my/org-blog-dir my/org-blog-post-prefix "rss.xml"))
+            (rss-link (file-name-concat
+                       my/org-blog-link my/org-blog-post-prefix "rss.xml"))
+            (link (file-name-concat
+                   my/org-blog-link my/org-blog-post-prefix key))
+            ;; rfc7321 time format
+            (pubdate (format-time-string "%a, %d %b %Y %T %z" date)))
+        (let* ((xml
+                (if (file-exists-p rss-file)
+                    (with-temp-buffer
+                      (insert-file-contents rss-file)
+                      (libxml-parse-xml-region))
+                  `(rss ((version . "2.0")
+                         (xmlns:atom . "http://www.w3.org/2005/Atom"))
+                        (channel nil
+                                 (title nil ,my/org-blog-rss-title)
+                                 (link nil ,my/org-blog-link)
+                                 (description nil ,my/org-blog-rss-desc)
+                                 (atom:link ((href . ,rss-link)
+                                             (rel . "self")
+                                             (type . "application/rss+xml")))))))
+               (channel (car (xml-get-children xml 'channel)))
+               (items (xml-get-children channel 'item))
+               (new-item `(item nil
+                                (title nil ,title)
+                                (link nil ,link)
+                                (guid ((isPermaLink . "true")) ,link)
+                                (pubDate nil ,pubdate)
+                                ,@(mapcar (lambda (tag) `(category nil ,tag)) tags))))
+          (if-let ((old-item (seq-find
+                              (lambda (item)
+                                (when (equal (caddr (car (xml-get-children item 'guid)))
+                                             link)
+                                  item))
+                              items)))
+              ;; update
+              (setf (cdr old-item) (cdr new-item))
+            ;; else insert at tail position
+            (nconc channel (list new-item)))
+          (with-temp-buffer
+            (insert "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            (xml-print (list xml))
+            (write-file rss-file)))))
+
+    (defun my:blog-rsync ()
+      (interactive)
+      (async-shell-command (concat my/org-blog-dir "rsync-blog.sh")))
+
+    (defun my:org-blog-post (&optional sync)
+      "Post current Org document to html to `my/org-post-dir'."
+      (interactive "P")
+      (dlet ((org-html-head-include-default-style nil)
+             (org-html-head
+              (format "<link rel=\"stylesheet\" type=\"text/css\" href=\"%s?v=latest\" />"
+                      (file-name-concat "/" my/org-blog-rsrc-prefix "styles.css")))
+             (org-html-preamble t)
+             (org-html-preamble-format `((,org-export-default-language ,my/org-blog-head)))
+             (org-html-postamble t)
+             (org-html-postamble-format `((,org-export-default-language ,my/org-blog-tail)))
+             (org-html-htmlize-output-type 'css))
+        (let ((title (or (org-get-title) "No Title"))
+              (org-file (buffer-file-name))
+              (f (org-html-export-to-html)))
+          (when (file-exists-p f)
+            (let ((d (my:strong-directory
+                      (file-name-concat my/org-blog-dir my/org-blog-post-prefix)))
+                  (base (file-name-base f))
+                  (assets (concat (file-name-sans-extension f) ".assets/")))
+              (rename-file f (file-name-concat d (concat base ".html")) t)
+              (when (file-directory-p assets)
+                (copy-directory assets (file-name-concat d (concat base ".assets/")) t t t))
+              (let ((f (concat base ".html"))
+                    (date (or (file-attribute-modification-time (file-attributes org-file))
+                              (current-time)))
+                    (tags (mapcar #'substring-no-properties org-file-tags)))
+                (my:blog-index-update f title date tags)
+                (my:blog-sitemap-update)
+                (my:blog-rss-update f title date tags))))))
+      (when sync my:blog-rsync))
+    )
+#+end_src
+
 ** org-roam
 Roam builds a note database by inserting a unique ID to your org notes.
 
@@ -2350,7 +2574,6 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :defines org-roam-cmd-map
     :custom
     (org-roam-directory (my:strong-directory (file-name-concat org-directory "roam/")))
-    (org-roam-dailies-directory "dailies/")
     (org-roam-db-location (file-name-concat org-roam-directory "org-roam.db"))
     ;; Use FILE-TRUENAME to avoid expansion on this directory
     (org-roam-file-exclude-regexp '("data/" "ltximg/" ".*\\.assets/"))
@@ -2360,13 +2583,16 @@ Roam builds a note database by inserting a unique ID to your org notes.
              (propertize " " 'display `((space :align-to (- right-fringe 20))))
              (propertize "${file-title}" 'face 'org-document-info)))
     :init
+    (setq org-roam-dailies-directory "dailies/")
+
     (defvar org-roam-cmd-map (make-sparse-keymap)
       "A keymap for org-roam related commands.")
 
     (defun my:org-roam-consult-grep ()
       "Grep in org-roam-directory with `consult-grep'."
       (interactive)
-      (consult-grep org-roam-directory ""))
+      (dlet ((grep-find-ignored-directories (list "ltximg/")))
+        (consult-grep org-roam-directory "")))
     :config
     (org-roam-db-autosync-mode)
     :bind-keymap
@@ -2384,6 +2610,18 @@ Roam builds a note database by inserting a unique ID to your org notes.
 
   (use-package org-roam-ql
     :ensure t
+    :config
+    (setq org-roam-ql-preview-function
+          (lambda (node _)
+            (if (= (org-roam-node-level node) 0)
+                ;; if it is at top level, insert all its content
+                (let ((beg (save-excursion
+                             (org-roam-end-of-meta-data t)
+                             (point)))
+                      (end (point-max)))
+                  (string-trim (buffer-substring-no-properties beg end)))
+              ;; otherwise simply call the default function.
+              (funcal org-roam-preview-function))))
     :bind
     (:map org-roam-cmd-map
           ("s" . org-roam-ql-search)
@@ -2470,7 +2708,7 @@ Other extensions that are helpful in ~org-mode~.
 
   ;; play org document as slides
   (use-package org-tree-slide :ensure t)
-  ;; for better org html output
+  ;; fontify code blocks as it is when use `org-export-html'
   (use-package htmlize :ensure t)
 #+end_src
 
@@ -2542,6 +2780,47 @@ These applications are actually desktop-level, BTW I use Emacs.
      )
     )
 
+  (use-package ellama
+    :ensure t
+    :bind ("C-c e" . ellama)
+    :config
+    (setopt ellama-auto-scroll t)
+    (setopt ellama-language "Chinese")
+    (require 'llm-ollama)
+    ;; Here we use Qwen3-30B-A3B MoE model with default configuration.
+    (setopt ellama-provider
+            (make-llm-ollama
+           ;; this model should be pulled to use it
+           ;; value should be the same as you print in terminal during pull
+           :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+             :embedding-model "qwen3-embedding:latest"
+           :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-summarization-provider
+          (make-llm-ollama
+           :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+           :embedding-model "qwen3-embedding:latest"
+           :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-coding-provider
+          (make-llm-ollama
+           :chat-model "qwen3-coder:latest"
+           :embedding-model "qwen3-embedding:latest"
+           :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-translation-provider
+          (make-llm-ollama
+           :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+           :embedding-model "qwen3-embedding:latest"
+           :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (setopt ellama-extraction-provider
+            (make-llm-ollama
+           :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
+           :embedding-model "qwen3-embedding:latest"
+           :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    ;; show ellama context in header line in all buffers
+    (ellama-context-header-line-global-mode +1)
+    ;; show ellama session id in header line in all buffers
+    (ellama-session-header-line-global-mode +1)
+    )
+
   (use-package gt
     :ensure t
     :autoload (gt-start
@@ -2611,6 +2890,11 @@ These applications are actually desktop-level, BTW I use Emacs.
     :ensure t
     :init
     (pdf-loader-install)
+    :hook
+    (pdf-view-mode . pdf-view-roll-minor-mode)
+    ;; support display page number in violet line
+    (pdf-view-mode
+     . (lambda () (setq violet-line-position mode-line-position)))
     )
 
   (use-package nov
@@ -2662,12 +2946,14 @@ My own packages, you can get them from github with ~vc-use-package~.
   (use-package my-misc
     :vc (:url "https://github.com/gynamics/my-misc.el")
     :defer nil
+    :init
+    (defalias 'my:asset-directory 'my-misc-asset-directory)
     :bind
-    ("M-#"   . my:mark-whole-line)
-    ("M-Q"   . my:unfill-paragraph)
-    ("C-x %" . my:eval-and-replace)
-    ("C-x 9" . my:dedicate-window-toggle)
-    ("<f9>"  . my:adjust-alpha-background)
+    ("M-#"   . my-misc-mark-whole-line)
+    ("M-Q"   . my-misc-unfill-paragraph)
+    ("C-x %" . my-misc-eval-and-replace)
+    ("C-x 9" . my-misc-dedicate-window-toggle)
+    ("<f9>"  . my-misc-adjust-alpha-background)
     )
 
   (use-package semantic-pkg-config
@@ -2681,9 +2967,9 @@ My own packages, you can get them from github with ~vc-use-package~.
   (use-package toc-glue
     :vc (:url "https://github.com/gynamics/toc-glue.el")
     :mode
-    ("\\.toc\\'" . toc-mode)
-    ("\\.bm.lisp\\'" . toc-glue-mode)
-    ("\\.djvubm.lisp\\'" . toc-glue-djvu-mode)
+    ("\\.toc\\'" . toc-glue-toc-mode)
+    ("\\.sbm.el\\'" . toc-glue-mode)
+    ("\\.bm.el\\'" . toc-glue-djvu-mode)
     )
 
   (use-package oboe
