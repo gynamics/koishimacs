@@ -146,9 +146,6 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
     (mapc
      (lambda (kv) (apply #'setenv kv))
      (my:strip-list
-      ;; for go
-      (when (file-directory-p (concat home ".go"))
-        `("GOPATH" ,(concat home ".go")))
       ;; proxy (if you have one)
       '("no_proxy" "localhost,127.0.0.1")
       '("http_proxy" "http://127.0.0.1:2080")
@@ -221,14 +218,16 @@ Emacs has a severe performance problem when ~load-path~ is a large list, discuss
       (add-to-list 'use-package-selected-packages (car args))
       (funcall fn name keyword args rest state))
 
-    (defun my:one-off-hook (hook function)
-      "Trigger FUNCTION only once on HOOK, then remove it."
+    (defun my:one-off-hook (hook function &optional depth local)
+      "Trigger FUNCTION only once on HOOK, then remove it.
+  DEPTH and LOCAL are passed to `add-hook' as optional arguments."
       (let ((fname (gensym "my:one-off-hook-")))
         (eval
          `(add-hook ',hook
                     (defun ,fname ()
                       (,function)
-                      (remove-hook ',hook ',fname))))))
+                      (remove-hook ',hook ',fname))
+                    ,depth ,local))))
 
     (defun my:advice-one-off (symbol how function &optional props)
       "Add an one-off advice FUNCTION to SYMBOL, then remove it.
@@ -596,7 +595,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
 
   (defface violet-line-emphasis-1
     `((t (:foreground
-          ,(if (bound-and-true-p koishi-theme-light) "#523" "#ADC")
+          ,(if (bound-and-true-p koishi-theme-mode) "#523" "#ADC")
           :weight bold)))
     "A custom face for violet-line segment display.")
 
@@ -647,6 +646,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
                    display (min-width (6.0)))
                   mode-line-frame-identification
                   violet-line-buffer-icon
+                  " "
                   violet-line-buffer-identification
                   "   "
                   violet-line-position
@@ -666,7 +666,7 @@ Other useful components:
   (use-package hide-mode-line
     :ensure t
     :bind
-    ("M-M" . hide-mode-line-mode)
+    ("C-c v m" . hide-mode-line-mode)
     )
 
   (use-package keycast
@@ -676,7 +676,7 @@ Other useful components:
     :custom
     (keycast-mode-line-format "%1s%k%r")
     (keycast-mode-line-remove-tail-elements nil)
-    (keycast-mode-line-insert-after 'mode-line-modes)
+    (keycast-mode-line-insert-after 'violet-line-modes)
     )
 #+end_src
 
@@ -1590,7 +1590,7 @@ They are FANTASTIC!!!
   (use-package diff-hl
     :ensure t
     :when my/load-gui-config-p
-    :diminish (diff-hl-mode . "  ")
+    :diminish (diff-hl-mode . " ")
     :commands (diff-hl-mode)
     :custom (global-diff-hl-mode t)
     :hook
@@ -1666,7 +1666,7 @@ They are FANTASTIC!!!
 
   (use-package rainbow-mode
     :ensure t
-    :diminish "  "
+    :diminish " "
     :commands (rainbow-mode)
     :hook ((emacs-lisp-mode sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode web-mode) . rainbow-mode)
     )
@@ -1727,7 +1727,8 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
 
     (defun my:eldoc-follow-markdown-link ()
       (interactive)
-      (eww-browse-url (get-text-property (point) 'help-echo)))
+      (when-let ((url (get-text-property (point) 'help-echo)))
+        (eww-browse-url url)))
 
     (define-advice eldoc--format-doc-buffer
         (:after (&rest r))
@@ -1740,6 +1741,7 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
 
   (use-package eldoc-box
     :ensure t
+    :when my/load-gui-config-p
     :diminish eldoc-box-hover-at-point-mode
     :diminish eldoc-box-hover-mode
     :bind
@@ -1843,8 +1845,6 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
           (c-mode . c-ts-mode)
           (c++-mode . c++-ts-mode)
           (css-mode . css-ts-mode)
-          (go-mode . go-ts-mode)
-          (go-mod-mode . go-mod-ts-mode)
           (haskell-mode . haskell-ts-mode)
           (html-mode . html-ts-mode)
           (java-mode . java-ts-mode)
@@ -1984,6 +1984,7 @@ Most of them are not configured and deferred.
     :config
     (require 'cc-mode)
     (defun c-ts-set-style (&optional style)
+      "Detect and setup C indentation STYLE for `c-ts-mode'."
       (interactive (list (completing-read "Set to style: " c-style-alist)))
       ;; detect file mode with cc-mode
       (if style
@@ -1993,20 +1994,21 @@ Most of them are not configured and deferred.
               (c-set-style style))
             (setq-local c-ts-mode-indent-offset
                         (assoc 'c-basic-offset (assoc style c-style-alist))))
+        ;; else detect style with `c-guess-buffer'
         (unless (bound-and-true-p c-ts-set-style--reentry)
-        (if (save-excursion
-              (save-restriction
-                (save-match-data
-                  (widen)
-                  (goto-char (point-min))
-                  (re-search-forward c-or-c++-mode--regexp
-                                     (+ (point) c-guess-region-max) t))))
-            (c++-mode)
-          (c-mode))
+          (if (save-excursion
+                (save-restriction
+                  (save-match-data
+                    (widen)
+                    (goto-char (point-min))
+                    (re-search-forward c-or-c++-mode--regexp
+                                       (+ (point) 4096) t))))
+              (c++-mode)
+            (c-mode))
           (c-guess-buffer)
-          ;; masking this function to recover ts mode
+          ;; mask this hook function when reentry ts mode
           (dlet ((c-ts-set-style--reentry t))
-            (c-or-c++-mode))
+            (c-or-c++-ts-mode))
           (setq-local c-ts-mode-indent-offset c-guess-guessed-basic-offset)))
       ;; refresh indent bars
       (when (bound-and-true-p indent-bars-mode)
@@ -2104,13 +2106,13 @@ Most of them are not configured and deferred.
 
   (use-package pyvenv
     :ensure t
-    :diminish "  "
+    :diminish " "
     :hook (python-mode . pyvenv-mode)
     )
 
   (use-package inf-lisp
     :init
-    (setq inferior-lisp-program "ros -Q run")
+    (setq inferior-lisp-program "sbcl")
     )
 
   (use-package slime
@@ -2198,7 +2200,6 @@ Most of them are not configured and deferred.
   (use-package bison-mode :ensure t)
   (use-package disaster :ensure t)
   (use-package gnuplot :ensure t)
-  (use-package go-mode :ensure t)
   (use-package graphviz-dot-mode :ensure t)
   (use-package lua-mode :ensure t)
   (use-package maxima :ensure t)
@@ -2354,7 +2355,9 @@ It is really interesting to write ~org-mode~ configurations in an org document.
      '(("haskell" . haskell-ts)
        ("python" . python-ts)
        ("scheme" . scheme)
-       ("lilypond" . LilyPond)))
+       ("dot" . graphviz-dot)
+       ("lilypond" . LilyPond)
+       ("sclang" . sclang)))
 
     (defun my:org-toggle-emphasis-markers ()
       "Toggle visibility of emphasis markers in current buffer."
@@ -2621,7 +2624,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
                       (end (point-max)))
                   (string-trim (buffer-substring-no-properties beg end)))
               ;; otherwise simply call the default function.
-              (funcal org-roam-preview-function))))
+              (funcall org-roam-preview-function))))
     :bind
     (:map org-roam-cmd-map
           ("s" . org-roam-ql-search)
@@ -2634,7 +2637,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :ensure t
     :diminish
     ((org-roam-ui-mode . " 󱗿")
-     (org-roam-ui-follow-mode . "  "))
+     (org-roam-ui-follow-mode . " "))
     :custom
     (org-roam-ui-open-on-start nil)
     :bind
@@ -2682,7 +2685,9 @@ Other extensions that are helpful in ~org-mode~.
     (advice-add
      #'org-download--dir-1
      :override ;; this does not work for temporary buffers,
-     (lambda () (concat "./" (file-name-base (buffer-file-name)) ".assets")))
+     (lambda ()
+       (when-let ((f (buffer-file-name)))
+         (concat "./" (file-name-base f) ".assets"))))
     :custom
     (org-download-heading-lvl nil)
     (org-download-screenshot-method "spectacle -br -o %s")
@@ -2988,6 +2993,24 @@ My own packages, you can get them from github with ~vc-use-package~.
 ** miscellaneous configurations
 
 #+begin_src emacs-lisp
+  (use-package man
+    :config
+    (define-advice Man-fontify-manpage (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\x1b\\]8;;.+?\x1b\\\\\\(.+?\\)\x1b]8;;\x1b\\\\" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
+    )
+
+  (use-package woman
+    :config
+    (define-advice woman-process-buffer (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\X'tty: link .+?'\\(.+?\\)\\\\X'tty: link'" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
+    )
+
   (use-package recentf
     :init
     (recentf-mode)
@@ -2998,11 +3021,11 @@ My own packages, you can get them from github with ~vc-use-package~.
     (add-to-list 'recentf-keep 'file-remote-p)
     )
 
-  (use-package abbrev :diminish  (abbrev-mode . "  "))
-  (use-package autorevert :diminish (auto-revert-mode . "  "))
+  (use-package abbrev :diminish  (abbrev-mode . " "))
+  (use-package autorevert :diminish (auto-revert-mode . " "))
 
   (use-package face-remap
-    :diminish (buffer-face-mode . "  ")
+    :diminish (buffer-face-mode . " ")
     :hook
     (my/prog-mode . buffer-face-mode)
     (my/org-mode . variable-pitch-mode)
@@ -3010,7 +3033,7 @@ My own packages, you can get them from github with ~vc-use-package~.
     )
 
   (use-package whitespace
-    :diminish (whitespace-mode . "  ")
+    :diminish (whitespace-mode . " ")
     :bind ("C-c v SPC" . whitespace-mode)
     )
 
@@ -3020,7 +3043,6 @@ My own packages, you can get them from github with ~vc-use-package~.
     (my/prog-mode . display-line-numbers-mode)
     (my/prog-mode
      . (lambda () ;; cleanup whitespaces on save.
-         (make-local-variable 'before-save-hook)
          (add-hook 'before-save-hook ;; make it buffer-local
                    #'(lambda () (whitespace-cleanup)) nil t)))
     )
