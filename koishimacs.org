@@ -55,6 +55,8 @@ Literate startup document needs to be tangled into a single ~.el~ or ~.elc~ file
 BTW, most user-defined configuration interfaces has prefix ~my:~, and variables has prefix ~my/~. Just a personal naming style. Emacs Lisp does not support Common Lisp style modules, this naming style is rejected by ~package-lint~, but personal configuration is a terminal of packages, so let's be free here.
 
 #+begin_src emacs-lisp
+  (autoload #'org-babel-tangle-file "ob-tangle")
+
   (defun my:tangle-koishimacs:full (byte-compile-p)
     "Tangle all code blocks in koishimacs.org and write them to koishimacs.el .
   If BYTE-COMPILE-P is given as t, byte compile it."
@@ -146,9 +148,8 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
     (mapc
      (lambda (kv) (apply #'setenv kv))
      (my:strip-list
-      ;; for go
-      (when (file-directory-p (concat home ".go"))
-        `("GOPATH" ,(concat home ".go")))
+      ;; disable guile's auto compilation in REPL
+      '("GUILE_AUTO_COMPILE" "0")
       ;; proxy (if you have one)
       '("no_proxy" "localhost,127.0.0.1")
       '("http_proxy" "http://127.0.0.1:2080")
@@ -221,14 +222,16 @@ Emacs has a severe performance problem when ~load-path~ is a large list, discuss
       (add-to-list 'use-package-selected-packages (car args))
       (funcall fn name keyword args rest state))
 
-    (defun my:one-off-hook (hook function)
-      "Trigger FUNCTION only once on HOOK, then remove it."
+    (defun my:one-off-hook (hook function &optional depth local)
+      "Trigger FUNCTION only once on HOOK, then remove it.
+  DEPTH and LOCAL are passed to `add-hook' as optional arguments."
       (let ((fname (gensym "my:one-off-hook-")))
         (eval
          `(add-hook ',hook
                     (defun ,fname ()
                       (,function)
-                      (remove-hook ',hook ',fname))))))
+                      (remove-hook ',hook ',fname))
+                    ,depth ,local))))
 
     (defun my:advice-one-off (symbol how function &optional props)
       "Add an one-off advice FUNCTION to SYMBOL, then remove it.
@@ -476,17 +479,19 @@ Terminal mode configuration, actually there are very little we can do to the ema
 #+end_src
 
 ** be iconic.
-~diminish~ can replace minor mode lighters in modeline. It has a keyword integration in ~use-package~ but not part of Emacs, so we need to patch ~use-package~ if it is not available.
+~diminish~ can replace minor mode lighters in modeline. It has a keyword integration in ~use-package~ but not part of Emacs. However, this package is not part of Emacs, so I decided to re-implement a simple version here.
 
+p. s. but remember that ~diminish.el~ is a nice elisp file to read.
 #+begin_src emacs-lisp
-  (use-package diminish :ensure t :defer nil)
+  (defvar diminished-mode-alist nil
+    "Association list to store diminished (MODE . LIGHTER) .")
 
-  ;; if diminish is not available, patch the keyword
-  (when (not (featurep 'diminish))
-    (define-advice use-package-handler/:diminish
-        (:around (orig-fun &rest args))
-      (use-package-process-keywords
-        (car args) (nth 4 args) (nth 5 args))))
+  (defun diminish (mode &optional to-what)
+    "Replace MODE's modeline lighter to TO-WHAT."
+    (when-let* ((minor (assq mode minor-mode-alist)))
+      (let ((to-what (or to-what "")))
+        (setf (alist-get mode diminished-mode-alist) (cdr minor))
+        (setcdr minor (list to-what)))))
 #+end_src
 
 ~nerd-icons~ provides an awesome icon pack.
@@ -543,7 +548,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
   (defvar-local violet-line-buffer-icon
       `(:eval
         (when my/be-iconic-p
-          (if-let ((s (buffer-file-name)))
+          (if-let* ((s (buffer-file-name)))
               (nerd-icons-icon-for-file s)
             (nerd-icons-icon-for-buffer))))
     )
@@ -561,7 +566,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
                              (remove 'violet-line-buffer-identification
                                      mode-line-format)))))))
            (violet-line--shrink-path
-            (if-let ((s (buffer-file-name)))
+            (if-let* ((s (buffer-file-name)))
                 (abbreviate-file-name s)
               (buffer-name))
             max-pixel-width))
@@ -596,7 +601,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
 
   (defface violet-line-emphasis-1
     `((t (:foreground
-          ,(if (bound-and-true-p koishi-theme-light) "#523" "#ADC")
+          ,(if (bound-and-true-p koishi-theme-mode) "#523" "#ADC")
           :weight bold)))
     "A custom face for violet-line segment display.")
 
@@ -647,6 +652,7 @@ Terminal mode configuration, actually there are very little we can do to the ema
                    display (min-width (6.0)))
                   mode-line-frame-identification
                   violet-line-buffer-icon
+                  " "
                   violet-line-buffer-identification
                   "   "
                   violet-line-position
@@ -666,7 +672,7 @@ Other useful components:
   (use-package hide-mode-line
     :ensure t
     :bind
-    ("M-M" . hide-mode-line-mode)
+    ("C-c v m" . hide-mode-line-mode)
     )
 
   (use-package keycast
@@ -676,7 +682,7 @@ Other useful components:
     :custom
     (keycast-mode-line-format "%1s%k%r")
     (keycast-mode-line-remove-tail-elements nil)
-    (keycast-mode-line-insert-after 'mode-line-modes)
+    (keycast-mode-line-insert-after 'violet-line-modes)
     )
 #+end_src
 
@@ -884,22 +890,6 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
            ("M-s l" . consult-line)                  ;; needed by consult-line to detect isearch
            ("M-s L" . consult-line-multi)            ;; needed by consult-line to detect isearch
            )
-
-    ;; Enable automatic preview at point in the *Completions* buffer. This is
-    ;; relevant when you use the default completion UI.
-    :hook (completion-list-mode . consult-preview-at-point-mode)
-    )
-
-  (use-package consult-flycheck
-    :ensure t
-    :bind ("M-g f" . consult-flycheck)              ;; Alternative: consult-flymake
-    )
-
-  (use-package consult-eglot
-    :ensure t
-    :bind
-    (:map eglot-mode-map
-          ([remap xref-find-apropos] . consult-eglot-symbols))
     )
 
   (use-package embark
@@ -923,11 +913,8 @@ Here we replace the ~C-s~ keybinding with ~consult-line~, although its behavior 
                    (window-parameters (mode-line-format . none))))
     )
 
-  (use-package embark-consult
-    :ensure t ; only need to install it, embark loads it after consult if found
-    :hook
-    (embark-collect-mode . consult-preview-at-point-mode)
-    )
+  ;; only need to install it, embark loads it after consult if found
+  (use-package embark-consult :ensure t)
 
 #+end_src
 
@@ -1107,15 +1094,6 @@ These are my collection, but not that important, or not used.
     :when my/load-gui-config-p
     )
 
-  ;; just something fun
-  (use-package power-mode
-    :ensure t
-    :when my/load-gui-config-p
-    :diminish " 󰟩"
-    :custom
-    (power-mode-streak-shake-threshold nil)
-    )
-
 #+end_src
 
 ** dashboard
@@ -1129,7 +1107,6 @@ A big but useless thing.
     ;; because these packages are placed later,
     ;; we have to specify these autoloads here.
     (autoload #'org-agenda "org-agenda")
-    (autoload #'elfeed "elfeed")
     (autoload #'gnus "gnus")
     :init
     (dashboard-setup-startup-hook)
@@ -1171,11 +1148,11 @@ A big but useless thing.
      '(((" " "Agenda" "Task for this week"
          (lambda (&rest _) (org-agenda-list))
          warning "[" "]")
-        (" " "Elfeed" "Browse RSS Feeds"
-         (lambda (&rest _) (elfeed))
-         warning "[" "]")
-        (" " "Gnus" "Browse News & Mails"
+        ("󰾱 " "Gnus" "Browse News & Mails"
          (lambda (&rest _) (gnus))
+         warning "[" "]")
+        (" " "News" "Browse Feeds"
+         (lambda (&rest _) (newsticker-show-news))
          warning "[" "]")
         (" " "Butterfly" "Real world programming!"
          (lambda (&rest _) (butterfly))
@@ -1195,7 +1172,6 @@ A big but useless thing.
     (:map dashboard-mode-map
           ("a" . org-agenda)
           ("b" . butterfly)
-          ("f" . elfeed)
           ("n" . gnus)
           )
     )
@@ -1261,7 +1237,10 @@ More previews and visual feedback.
 #+begin_src emacs-lisp
   (use-package simple
     :diminish (visual-line-mode . " 󰴐")
-    :hook (my/org-mode . visual-line-mode)
+    :custom
+    (word-wrap-by-category t)
+    :hook
+    (my/org-mode . visual-line-mode)
     :bind
     ("C-c v l" . visual-line-mode)
     )
@@ -1279,7 +1258,8 @@ More previews and visual feedback.
     :ensure t
     :bind
     ([remap query-replace-regexp] . vr/query-replace)
-    ("C-c M-%" . vr/mc-mark)
+    ("C-c M-r" . vr/replace)
+    ("C-c M-m" . vr/mc-mark)
     )
 
   (use-package vundo
@@ -1304,7 +1284,7 @@ Writing with templates.
   (use-package yasnippet
     :ensure t
     :diminish (yas-minor-mode . " 󰰳")
-    :hook ((my/org-mode my/prog-mode) . yas-minor-mode)
+    :hook ((my/org-mode my/prog-mode sgml-mode nxml-mode) . yas-minor-mode)
     :defines yas-minor-mode-map
     )
 
@@ -1511,7 +1491,7 @@ By default ~company~ uses overlay for display completion options, which has a se
           ("C-<tab>" . company-other-backend)
           ("C-:" . company-begin-backend))
     :hook
-    ((my/prog-mode my/org-mode) . company-mode)
+    (my/prog-mode . company-mode)
     (company-mode . my:select-company-backends)
     )
 
@@ -1590,7 +1570,7 @@ They are FANTASTIC!!!
   (use-package diff-hl
     :ensure t
     :when my/load-gui-config-p
-    :diminish (diff-hl-mode . "  ")
+    :diminish (diff-hl-mode . " ")
     :commands (diff-hl-mode)
     :custom (global-diff-hl-mode t)
     :hook
@@ -1626,6 +1606,17 @@ They are FANTASTIC!!!
     :ensure t
     :config
     (require 'indent-bars-ts)           ; not needed with straight
+    ;; not compatible with whitespace-mode
+    (define-advice whitespace-mode (:before (&optional arg))
+      (when (and (bound-and-true-p indent-bars-mode)
+                 (not (bound-and-true-p whitespace-mode)))
+        (setq-local ws-override-indent-bars t)
+        (indent-bars-mode -1)))
+    (define-advice whitespace-mode (:after (&optional arg))
+      (when (and (not (bound-and-true-p whitespace-mode))
+                 (bound-and-true-p ws-override-indent-bars))
+        (setq-local ws-override-indent-bars nil)
+        (indent-bars-mode)))
     :custom
     ;; 2025-11-5: currently the default bar character is buggy in terminal
     (indent-bars-no-stipple-char (if my/be-iconic-p ?¦ ?|))
@@ -1666,7 +1657,7 @@ They are FANTASTIC!!!
 
   (use-package rainbow-mode
     :ensure t
-    :diminish "  "
+    :diminish " "
     :commands (rainbow-mode)
     :hook ((emacs-lisp-mode sgml-mode css-mode js-base-mode conf-mode nxml-mode yaml-pro-mode web-mode) . rainbow-mode)
     )
@@ -1676,6 +1667,7 @@ They are FANTASTIC!!!
 ** syntax checker
 We got two backends: flycheck and flymake. Flymake is built-in but flycheck is more powerful.
 
+I prefer to use flycheck, but keep a minimal configuration for flymake.
 #+begin_src emacs-lisp
   (use-package flycheck
     :ensure t
@@ -1689,6 +1681,11 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
          (when (member (buffer-name)
                        '("*Pp Eval Output*" "*Pp Macroexpand Output*"))
            (flycheck-mode -1))))
+    )
+
+  (use-package flycheck-eglot
+    :ensure t
+    :hook (eglot-managed-mode . flycheck-eglot-mode)
     )
 
   (use-package flycheck-guile
@@ -1727,7 +1724,8 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
 
     (defun my:eldoc-follow-markdown-link ()
       (interactive)
-      (eww-browse-url (get-text-property (point) 'help-echo)))
+      (when-let* ((url (get-text-property (point) 'help-echo)))
+        (eww-browse-url url)))
 
     (define-advice eldoc--format-doc-buffer
         (:after (&rest r))
@@ -1740,6 +1738,7 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
 
   (use-package eldoc-box
     :ensure t
+    :when my/load-gui-config-p
     :diminish eldoc-box-hover-at-point-mode
     :diminish eldoc-box-hover-mode
     :bind
@@ -1843,8 +1842,6 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
           (c-mode . c-ts-mode)
           (c++-mode . c++-ts-mode)
           (css-mode . css-ts-mode)
-          (go-mode . go-ts-mode)
-          (go-mod-mode . go-mod-ts-mode)
           (haskell-mode . haskell-ts-mode)
           (html-mode . html-ts-mode)
           (java-mode . java-ts-mode)
@@ -1882,6 +1879,69 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
        (typescript "\\.ts\\'")
        (typescript "\\.tsx\\'" tsx-ts-mode)
        ))
+    )
+
+  ;; c-ts-mode has a rough indentation setting compared to cc-mode
+  ;; currently let's add a helper for setting styles
+  (use-package c-ts-mode
+    :commands (my:c-ts-set-style)
+    :config
+    (require 'cc-mode)
+    (defun my:c-ts-set-style (&optional style)
+      "Detect and setup C indentation STYLE for `c-ts-mode'."
+      (interactive
+       (list (completing-read
+              "Style: " (mapcar #'car (c-ts-mode--indent-styles major-mode)))))
+      ;; detect file mode with cc-mode
+      (if style
+          (c-ts-mode-set-style style)
+        ;; else detect style with `c-guess-buffer'
+        (let ((is-c++-p) (guessed-offset))
+          (unless (bound-and-true-p c-ts-set-style--reentry)
+            (if (save-excursion
+                  (save-restriction
+                    (save-match-data
+                      (widen)
+                      (goto-char (point-min))
+                      (re-search-forward c-or-c++-mode--regexp
+                                         (+ (point) 4096) t))))
+                (progn
+                  (setq is-c++-p t)
+                  (c++-mode))
+              (c-mode))
+            (setq guessed-offset
+                  (condition-case nil
+                      (c-guess-buffer)
+                    (:success c-guess-guessed-basic-offset)
+                    ;; catch error if guess failed
+                    (error (message "Guess failed, fallback to 2.") 2)))
+            ;; mask this hook function when reentry ts mode
+            (dlet ((c-ts-set-style--reentry t))
+              (if is-c++-p (c++-ts-mode) (c-ts-mode)))
+            (setq-local c-ts-mode-indent-offset guessed-offset))))
+      ;; refresh indent bars
+      (when (bound-and-true-p indent-bars-mode)
+        (indent-bars-reset)))
+    :bind
+    (:map c-ts-base-mode-map
+          ([remap c-ts-mode-set-style] . my:c-ts-set-style))
+    :hook
+    ((c-ts-mode c++-ts-mode) . my:c-ts-set-style)
+    )
+
+  (use-package haskell-ts-mode
+    :ensure t
+    :custom
+    (haskell-ts-highlight-signature t)
+    :hook
+    (haskell-ts-mode . (lambda () (setq mode-name "Haskell")))
+    :bind
+    ;; use commands provided by `inferior-haskell-mode'
+    (:map haskell-ts-mode-map
+          ("C-c C-c" . haskell-compile)
+          ("C-c C-s" . haskell-hoogle)
+          ("C-c C-d" . haskell-interactive-bring)
+          ("C-c C-r" . run-haskell))
     )
 #+end_src
 
@@ -1977,42 +2037,17 @@ Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, which is a 
 Most of them are not configured and deferred.
 
 #+begin_src emacs-lisp
-  ;; c-ts-mode has a rough indentation setting compared to cc-mode
-  ;; currently let's add a helper for setting styles
-  (use-package c-ts-mode
-    :commands (c-ts-set-style)
-    :config
-    (require 'cc-mode)
-    (defun c-ts-set-style (&optional style)
-      (interactive (list (completing-read "Set to style: " c-style-alist)))
-      ;; detect file mode with cc-mode
-      (if style
-          (progn
-            (if (member (intern style) '(gnu k&r bsd linux))
-                (c-ts-mode-set-style style)
-              (c-set-style style))
-            (setq-local c-ts-mode-indent-offset
-                        (assoc 'c-basic-offset (assoc style c-style-alist))))
-        (unless (bound-and-true-p c-ts-set-style--reentry)
-        (if (save-excursion
-              (save-restriction
-                (save-match-data
-                  (widen)
-                  (goto-char (point-min))
-                  (re-search-forward c-or-c++-mode--regexp
-                                     (+ (point) c-guess-region-max) t))))
-            (c++-mode)
-          (c-mode))
-          (c-guess-buffer)
-          ;; masking this function to recover ts mode
-          (dlet ((c-ts-set-style--reentry t))
-            (c-or-c++-mode))
-          (setq-local c-ts-mode-indent-offset c-guess-guessed-basic-offset)))
-      ;; refresh indent bars
-      (when (bound-and-true-p indent-bars-mode)
-        (indent-bars-reset)))
-    :hook
-    ((c-ts-mode c++-ts-mode) . c-ts-set-style)
+  (use-package gnu-apl-mode
+    :ensure t
+    :init
+    ;; exchange key prefix to 96 (backquote), which is similar to dyalog
+    (with-eval-after-load 'gnu-apl-input
+      (customize-set-variable 'gnu-apl-key-prefix ?`))
+    (with-eval-after-load 'gnu-apl-symbols
+      (setcdr (assoc "backslash-bar" gnu-apl--symbols) '("⍀" "."))
+      (setcdr (assoc "delta-underbar" gnu-apl--symbols) '("⍙" ">")))
+    :hook ((gnu-apl-mode gnu-apl-interactive-mode)
+           . (lambda () (set-input-method "APL-Z")))
     )
 
   ;; simple configuration for C/C++ build and debug.
@@ -2087,30 +2122,15 @@ Most of them are not configured and deferred.
           ("C-c C-c" . haskell-compile))
     )
 
-  (use-package haskell-ts-mode
-    :ensure t
-    :custom
-    (haskell-ts-highlight-signature t)
-    :hook
-    (haskell-ts-mode . (lambda () (setq mode-name "Haskell")))
-    :bind
-    ;; use commands provided by `inferior-haskell-mode'
-    (:map haskell-ts-mode-map
-          ("C-c C-c" . haskell-compile)
-          ("C-c C-s" . haskell-hoogle)
-          ("C-c C-d" . haskell-interactive-bring)
-          ("C-c C-r" . run-haskell))
-    )
-
   (use-package pyvenv
     :ensure t
-    :diminish "  "
+    :diminish " "
     :hook (python-mode . pyvenv-mode)
     )
 
   (use-package inf-lisp
     :init
-    (setq inferior-lisp-program "ros -Q run")
+    (setq inferior-lisp-program "sbcl")
     )
 
   (use-package slime
@@ -2157,6 +2177,8 @@ Most of them are not configured and deferred.
        name))
     :custom
     (geiser-repl-history-filename (my:geiser-file-path ".geiser_history"))
+    ;; press C-c C-s to switch implementation
+    (geiser-default-implementation 'guile)
     )
 
   (use-package geiser-chez
@@ -2198,7 +2220,6 @@ Most of them are not configured and deferred.
   (use-package bison-mode :ensure t)
   (use-package disaster :ensure t)
   (use-package gnuplot :ensure t)
-  (use-package go-mode :ensure t)
   (use-package graphviz-dot-mode :ensure t)
   (use-package lua-mode :ensure t)
   (use-package maxima :ensure t)
@@ -2259,6 +2280,34 @@ It is not that fashionable to send and read mails in Emacs, but it just has such
                     (nnimap-stream tls)
                     (nnimap-inbox "INBOX"))))
     )
+
+  (use-package newsticker
+    :init
+    (defun my:newsticker-browse-url ()
+      (interactive)
+      (let ((url))
+        (with-current-buffer (newsticker--treeview-list-buffer)
+          (setf url (get-text-property (point) :nt-link)))
+        (when url (eww-browse-url url))))
+
+    (use-package newst-treeview
+      :bind
+      (:map newsticker-treeview-item-mode-map
+            ("." . my:newsticker-browse-url)))
+    :custom-face
+    (newsticker-treeview-face ((t (:inherit default :foreground nil))))
+    :custom
+    (newsticker-retrieval-interval 3600)
+    (newsticker-retrieval-method 'extern)
+    (newsticker-url-list
+     '(("LWN (Linux Weekly News)" "https://lwn.net/headlines/rss")
+       ("Schneier on Security" "https://www.schneier.com/feed/atom/")
+       ("Physics" "https://phys.org/rss-feed/physics-news/physics/")
+       ("Astronomy" "https://phys.org/rss-feed/space-news/astronomy/")
+       ("Earth" "https://phys.org/rss-feed/earth-news/earth-sciences/")
+       ("XKCD" "https://xkcd.com/rss.xml")
+       ("Gynamics's Blog Posts" "https://gynamics.top/posts/rss.xml")))
+    )
 #+end_src
 
 ** org-mode
@@ -2266,7 +2315,6 @@ It is really interesting to write ~org-mode~ configurations in an org document.
 
 #+begin_src emacs-lisp
   (use-package org
-    :autoload (org-babel-tangle-file)
     :defines org-mode-map
     :custom
     (org-directory (my:weak-directory "/wsp/doc/org"))
@@ -2307,14 +2355,13 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     :config
     ;; pdflatex is not very efficient, but only pdflatex supports tikz
     ;; original configuration use magick, but dvisvgm actually supports pdf
-    (add-to-list
-     'org-preview-latex-process-alist
-     '(dvisvgm-pdf
-       :programs ("latex" "dvisvgm") :description "pdf > svg"
-       :message
-       "you need to install the programs: latex and dvisvgm."
+    (setf
+     (alist-get 'dvisvgm-pdf org-preview-latex-process-alist)
+     '(:programs ("latex" "dvisvgm") :description "pdf > svg"
+       :message "you need to install the programs: latex and dvisvgm."
        :image-input-type "pdf" :image-output-type "svg"
-       :image-size-adjust (1.0 . 1.0) :latex-compiler
+       :image-size-adjust (1.0 . 1.0)
+       :latex-compiler
        ("pdflatex -interaction nonstopmode -output-directory %o %f")
        :image-converter
        ("pdfcrop %f %f"
@@ -2347,14 +2394,6 @@ It is really interesting to write ~org-mode~ configurations in an org document.
                        'display
                        (list 'image :type imagetype :file image :ascent 'center :mask 'heuristic))))
       )
-
-    (mapc
-     (lambda (kv)
-       (setf (alist-get (car kv) org-src-lang-modes) (cdr kv)))
-     '(("haskell" . haskell-ts)
-       ("python" . python-ts)
-       ("scheme" . scheme)
-       ("lilypond" . LilyPond)))
 
     (defun my:org-toggle-emphasis-markers ()
       "Toggle visibility of emphasis markers in current buffer."
@@ -2398,6 +2437,19 @@ It is really interesting to write ~org-mode~ configurations in an org document.
   (use-package org-capture
     :diminish (org-capture-mode . " 󰄀")
     )
+
+  (use-package org-src
+    :config
+    (mapc
+     (lambda (kv)
+       (setf (alist-get (car kv) org-src-lang-modes) (cdr kv)))
+     '(("haskell" . haskell-ts)
+       ("python" . python-ts)
+       ("scheme" . scheme)
+       ("dot" . graphviz-dot)
+       ("lilypond" . LilyPond)
+       ("sclang" . sclang)))
+    )
 #+end_src
 
 ** publish
@@ -2407,7 +2459,7 @@ Resource files are written by myself, not shipped with koishimacs.
 
 #+begin_src emacs-lisp
   (use-package ox
-    :commands (my:blog-sitemap-update my:blog-rsync my:org-blog-post)
+    :commands (my:blog-sitemap-update my:blog-rsync my:blog-export my:org-blog-post)
     :config
     (defvar my/org-blog-link "https://gynamics.top")
     (defvar my/org-blog-dir "/wsp/edu/gynamics.top/")
@@ -2421,8 +2473,9 @@ Resource files are written by myself, not shipped with koishimacs.
                       "<script src=\"%s\"></script>")
               (file-name-concat "/" my/org-blog-js-prefix "head-container.js")))
     (defvar my/org-blog-tail
-      (format (concat "<div id=\"tail-container\">&copy 2026 gynamics</div>"
+      (format (concat "<div id=\"tail-container\">&copy %s gynamics</div>"
                       "<script src=\"%s\"></script>")
+              (format-time-string "%Y")
               (file-name-concat "/" my/org-blog-js-prefix "tail-container.js")))
 
     (autoload 'json-read-file "json")
@@ -2512,7 +2565,7 @@ Resource files are written by myself, not shipped with koishimacs.
                                 (guid ((isPermaLink . "true")) ,link)
                                 (pubDate nil ,pubdate)
                                 ,@(mapcar (lambda (tag) `(category nil ,tag)) tags))))
-          (if-let ((old-item (seq-find
+          (if-let* ((old-item (seq-find
                               (lambda (item)
                                 (when (equal (caddr (car (xml-get-children item 'guid)))
                                              link)
@@ -2531,9 +2584,8 @@ Resource files are written by myself, not shipped with koishimacs.
       (interactive)
       (async-shell-command (concat my/org-blog-dir "rsync-blog.sh")))
 
-    (defun my:org-blog-post (&optional sync)
-      "Post current Org document to html to `my/org-post-dir'."
-      (interactive "P")
+    (defun my:blog-export ()
+      (interactive)
       (dlet ((org-html-head-include-default-style nil)
              (org-html-head
               (format "<link rel=\"stylesheet\" type=\"text/css\" href=\"%s?v=latest\" />"
@@ -2543,24 +2595,29 @@ Resource files are written by myself, not shipped with koishimacs.
              (org-html-postamble t)
              (org-html-postamble-format `((,org-export-default-language ,my/org-blog-tail)))
              (org-html-htmlize-output-type 'css))
-        (let ((title (or (org-get-title) "No Title"))
-              (org-file (buffer-file-name))
-              (f (org-html-export-to-html)))
-          (when (file-exists-p f)
-            (let ((d (my:strong-directory
-                      (file-name-concat my/org-blog-dir my/org-blog-post-prefix)))
-                  (base (file-name-base f))
-                  (assets (concat (file-name-sans-extension f) ".assets/")))
-              (rename-file f (file-name-concat d (concat base ".html")) t)
-              (when (file-directory-p assets)
-                (copy-directory assets (file-name-concat d (concat base ".assets/")) t t t))
-              (let ((f (concat base ".html"))
-                    (date (or (file-attribute-modification-time (file-attributes org-file))
-                              (current-time)))
-                    (tags (mapcar #'substring-no-properties org-file-tags)))
-                (my:blog-index-update f title date tags)
-                (my:blog-sitemap-update)
-                (my:blog-rss-update f title date tags))))))
+        (org-html-export-to-html)))
+
+    (defun my:org-blog-post (&optional sync)
+      "Post current Org document to html to `my/org-post-dir'."
+      (interactive "P")
+      (let ((title (or (org-get-title) "No Title"))
+            (org-file (buffer-file-name))
+            (f (my:blog-export)))
+        (when (file-exists-p f)
+          (let ((d (my:strong-directory
+                    (file-name-concat my/org-blog-dir my/org-blog-post-prefix)))
+                (base (file-name-base f))
+                (assets (concat (file-name-sans-extension f) ".assets/")))
+            (rename-file f (file-name-concat d (concat base ".html")) t)
+            (when (file-directory-p assets)
+              (copy-directory assets (file-name-concat d (concat base ".assets/")) t t t))
+            (let ((name (concat base ".html"))
+                  (date (or (file-attribute-modification-time (file-attributes org-file))
+                            (current-time)))
+                  (tags (mapcar #'substring-no-properties org-file-tags)))
+              (my:blog-index-update name title date tags)
+              (my:blog-sitemap-update)
+              (my:blog-rss-update name title date tags)))))
       (when sync my:blog-rsync))
     )
 #+end_src
@@ -2621,7 +2678,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
                       (end (point-max)))
                   (string-trim (buffer-substring-no-properties beg end)))
               ;; otherwise simply call the default function.
-              (funcal org-roam-preview-function))))
+              (funcall org-roam-preview-function))))
     :bind
     (:map org-roam-cmd-map
           ("s" . org-roam-ql-search)
@@ -2634,7 +2691,7 @@ Roam builds a note database by inserting a unique ID to your org notes.
     :ensure t
     :diminish
     ((org-roam-ui-mode . " 󱗿")
-     (org-roam-ui-follow-mode . "  "))
+     (org-roam-ui-follow-mode . " "))
     :custom
     (org-roam-ui-open-on-start nil)
     :bind
@@ -2682,7 +2739,9 @@ Other extensions that are helpful in ~org-mode~.
     (advice-add
      #'org-download--dir-1
      :override ;; this does not work for temporary buffers,
-     (lambda () (concat "./" (file-name-base (buffer-file-name)) ".assets")))
+     (lambda ()
+       (when-let* ((f (buffer-file-name)))
+         (concat "./" (file-name-base f) ".assets"))))
     :custom
     (org-download-heading-lvl nil)
     (org-download-screenshot-method "spectacle -br -o %s")
@@ -2726,6 +2785,11 @@ These applications are actually desktop-level, BTW I use Emacs.
     :custom
     (dirvish-attributes
      '(vc-state subtree-state nerd-icons git-msg file-time file-size))
+    :config
+    (defun dirvish-fd-narrow ()
+      (interactive)
+      (mapc #'call-interactively
+            '(dirvish-fd dirvish-narrow)))
     :bind
     (("C-S-e" . dirvish-side)
      :map dirvish-mode-map
@@ -2736,7 +2800,7 @@ These applications are actually desktop-level, BTW I use Emacs.
      ("<" . dirvish-history-last)
      (">" . dirvish-history-jump)
      ("?" . dirvish-dispatch)
-     ("/" . dirvish-narrow)
+     ("/" . dirvish-fd-narrow)
      )
     )
 
@@ -2762,22 +2826,6 @@ These applications are actually desktop-level, BTW I use Emacs.
     :no-require
     :hook
     ((my/org-mode LaTeX-mode) . citar-embark-mode)
-    )
-
-  (use-package elfeed
-    :ensure t
-    :commands (elfeed)
-    :custom
-    (elfeed-db-directory (concat user-emacs-directory "elfeed"))
-    (elfeed-enclosure-default-dir (concat user-emacs-directory "elfeed-enclosure"))
-    (elfeed-feeds
-     '("https://planet.emacslife.org/atom.xml"
-       "https://phys.org/rss-feed/physics-news/physics/"
-       "https://phys.org/rss-feed/space-news/astronomy/"
-       "https://phys.org/rss-feed/earth-news/earth-sciences/"
-       "https://xkcd.com/rss.xml"
-       )
-     )
     )
 
   (use-package ellama
@@ -2914,11 +2962,10 @@ You may disable this block if you are not ready to be deliver packages to commun
     :ensure t
     :autoload (package-lint-buffer)
     :init
-    (defun my:pacakge-lint-file (&optional filename)
+    (defun my:package-lint-file (&optional filename)
       "Display lint errors and warnings for a file of FILENAME."
       (interactive
-       (list (or (buffer-file-name)
-                 (read-file-name "Lint file: "))))
+       (list (read-file-name "Lint file: " nil (buffer-file-name))))
       (let ((errs (package-lint-buffer (find-file filename)))
             (buf "*Package-Lint*"))
         (with-current-buffer (get-buffer-create buf)
@@ -2958,10 +3005,6 @@ My own packages, you can get them from github with ~vc-use-package~.
     :vc (:url "https://github.com/gynamics/semantic-pkg-config.el")
     )
 
-  (use-package railgun
-    :vc (:url "https://github.com/gynamics/railgun.el")
-    )
-
   (use-package toc-glue
     :vc (:url "https://github.com/gynamics/toc-glue.el")
     :mode
@@ -2988,21 +3031,38 @@ My own packages, you can get them from github with ~vc-use-package~.
 ** miscellaneous configurations
 
 #+begin_src emacs-lisp
+  (use-package man
+    :config
+    (define-advice Man-fontify-manpage (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\x1b\\]8;;.+?\x1b\\\\\\(.+?\\)\x1b]8;;\x1b\\\\" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
+    )
+
+  (use-package woman
+    :config
+    (define-advice woman-process-buffer (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\X'tty: link .+?'\\(.+?\\)\\\\X'tty: link'" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
+    )
+
   (use-package recentf
     :init
     (recentf-mode)
     :custom
     (recentf-max-saved-items 64)
-    :config
     ;; do not waste time on checking remote files
-    (add-to-list 'recentf-keep 'file-remote-p)
+    (recentf-keep '(file-remote-p file-readable-p))
     )
 
-  (use-package abbrev :diminish  (abbrev-mode . "  "))
-  (use-package autorevert :diminish (auto-revert-mode . "  "))
+  (use-package abbrev :diminish  (abbrev-mode . " "))
+  (use-package autorevert :diminish (auto-revert-mode . " "))
 
   (use-package face-remap
-    :diminish (buffer-face-mode . "  ")
+    :diminish (buffer-face-mode . " ")
     :hook
     (my/prog-mode . buffer-face-mode)
     (my/org-mode . variable-pitch-mode)
@@ -3010,7 +3070,7 @@ My own packages, you can get them from github with ~vc-use-package~.
     )
 
   (use-package whitespace
-    :diminish (whitespace-mode . "  ")
+    :diminish (whitespace-mode . " ")
     :bind ("C-c v SPC" . whitespace-mode)
     )
 
@@ -3020,7 +3080,6 @@ My own packages, you can get them from github with ~vc-use-package~.
     (my/prog-mode . display-line-numbers-mode)
     (my/prog-mode
      . (lambda () ;; cleanup whitespaces on save.
-         (make-local-variable 'before-save-hook)
          (add-hook 'before-save-hook ;; make it buffer-local
                    #'(lambda () (whitespace-cleanup)) nil t)))
     )
