@@ -338,7 +338,6 @@ Originally I mount a lot of minor modes on ~prog-mode-hook~, however, this may b
   (add-hook 'after-init-hook #'my:inject-hook-decorators)
 #+end_src
 
-* UI
 ** TUI acceleration
 We may avoid loading something packages that may cause problems in
 terminal. However, the client configuration depends on the daemon. To make
@@ -355,24 +354,121 @@ still can not set this in ~early-init.el~
   Currently we do not have a good way to detect if they're supported.")
 #+end_src
 
-** color scheme
-A beautiful color scheme is necessary for everyone's eyes.
+** base configuration
+Miscellaneous configurations for built-in packages, we should load them earlier so that they can be further tweaked.
 
 #+begin_src emacs-lisp
-  (use-package koishi-theme
-    :ensure t
-    :init
-    ;; load a sweet color theme
-    ;; currently koishi-theme is not suit for 8-color terminal
-    (when (or (daemonp)
-              (>= (display-color-cells) 256))
-      (load-theme 'koishi))
-    ;; background transparency in TUI mode
-    (unless my/load-gui-config-p
-      (setf (alist-get 'background-color default-frame-alist) nil))
+  (use-package man
+    :config
+    (define-advice Man-fontify-manpage (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\x1b\\]8;;.+?\x1b\\\\\\(.+?\\)\x1b]8;;\x1b\\\\" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
     )
+
+  (use-package woman
+    :config
+    (define-advice woman-process-buffer (:before ())
+      (goto-char (point-min))
+      (while (re-search-forward "\\\\X'tty: link .+?'\\(.+?\\)\\\\X'tty: link'" nil t)
+        (replace-match "\\1"))
+      (goto-char (point-min)))
+    )
+
+  (use-package recentf
+    :init
+    (recentf-mode)
+    :custom
+    (recentf-max-saved-items 64)
+    ;; do not waste time on checking remote files
+    (recentf-keep '(file-remote-p file-readable-p))
+    )
+
+  (use-package abbrev :diminish  (abbrev-mode . " "))
+  (use-package autorevert :diminish (auto-revert-mode . " "))
+
+  (use-package face-remap
+    :diminish (buffer-face-mode . " ")
+    :hook
+    (my/prog-mode . buffer-face-mode)
+    (my/org-mode . variable-pitch-mode)
+    :bind ("C-c v b" . buffer-face-mode)
+    )
+
+  (use-package whitespace
+    :diminish (whitespace-mode . " ")
+    :bind ("C-c v SPC" . whitespace-mode)
+    )
+
+  (use-package prog-mode
+    :hook
+    (my/prog-mode . prettify-symbols-mode)
+    (my/prog-mode . display-line-numbers-mode)
+    (my/prog-mode
+     . (lambda () ;; cleanup whitespaces on save.
+         (add-hook 'before-save-hook ;; make it buffer-local
+                   #'(lambda () (whitespace-cleanup)) nil t)))
+    )
+
+  (use-package pp
+    :init
+    (define-advice pp-display-expression
+        (:override (expression out-buffer-name &optional lisp))
+      "A hacked version which always use `popwin:popup-buffer' for display."
+      (let* ((lexical lexical-binding)
+             (old-show-function temp-buffer-show-function)
+             (temp-buffer-show-function #'popwin:popup-buffer))
+        (with-output-to-temp-buffer out-buffer-name
+          (if lisp
+              (with-current-buffer standard-output
+                (pp-emacs-lisp-code expression))
+            (pp expression))
+          (with-current-buffer standard-output
+            (emacs-lisp-mode)
+            (setq lexical-binding lexical)
+            (setq buffer-read-only nil)
+            (setq-local font-lock-verbose nil)))))
+    )
+
+  ;; some general configurations
+  (use-package emacs
+    :custom
+    (blink-cursor-mode nil)
+    (buffer-face-mode-face 'default)
+    (column-number-mode t)
+    (delete-by-moving-to-trash t)
+    (fill-column 80)
+    (indent-tabs-mode nil)
+    (inhibit-startup-screen t)
+    (native-comp-async-report-warnings-errors nil)
+    (prettify-symbols-unprettify-at-point 'right-edge)
+    (scroll-bar-mode nil)
+    (size-indication-mode t)
+    (tab-always-indent t)
+    (tool-bar-mode nil)
+    (undo-limit (expt 2 20))
+    ;; do not make backups
+    (make-backup-files nil)
+    ;; or, save backups in a specific directory if necessary
+    ;; (backup-directory-alist
+    ;;  `(("." . ,(concat user-emacs-directory "backups")))
+    :bind
+    ([remap list-buffers]    . ibuffer)
+    ([remap eval-last-sexp]  . pp-eval-last-sexp)
+    ([remap eval-expression] . pp-eval-expression)
+    ([remap dabbrev-expand]  . hippie-expand)
+    ("C-x M-e" . pp-macroexpand-last-sexp)
+    ("C-x M-s" . macrostep-mode)
+    ("C-x M-." . xref-find-definitions)
+    )
+
+  ;; enable some disabled functions
+  (put 'downcase-region 'disabled nil) ;; C-x C-l
+  (put 'upcase-region 'disabled nil)   ;; C-x C-u
 #+end_src
 
+* UI
 ** initialization
 Setup GUI. We can set the initial X window size and position. It is a pity that the han font can not be scaled once the size is fixed. To solve the problem, we can only set specific font face when width alignment is needed.
 
@@ -421,8 +517,6 @@ Setup GUI. We can set the initial X window size and position. It is a pity that 
     (set-frame-parameter (selected-frame) 'alpha-background 80)
     ;; (set-frame-position (selected-frame) 60 60)
     (set-frame-size (selected-frame) 120 40)
-    ;; toggle pixel scrolling
-    (pixel-scroll-precision-mode)
     )
 
 #+end_src
@@ -473,8 +567,26 @@ Terminal mode configuration, actually there are very little we can do to the ema
      ("D" [left]))
     ;; arrow keys may be broken in some terminals,
     ;; define a wrapper to translate ESC [ or ESC O
-    (define-key esc-map "[" arrow-keys-map)
-    (define-key esc-map "O" arrow-keys-map)
+    (keymap-set esc-map "[" arrow-keys-map)
+    (keymap-set esc-map "O" arrow-keys-map)
+    )
+#+end_src
+
+** color scheme
+A beautiful color scheme is necessary for everyone's eyes.
+
+#+begin_src emacs-lisp
+  (use-package koishi-theme
+    :ensure t
+    :init
+    ;; load a sweet color theme
+    ;; currently koishi-theme is not suitable for 8-color terminal
+    (when (or (daemonp)
+              (>= (display-color-cells) 256))
+      (load-theme 'koishi))
+    ;; background transparency in TUI mode
+    (unless my/load-gui-config-p
+      (setf (alist-get 'background-color default-frame-alist) nil))
     )
 #+end_src
 
@@ -588,10 +700,10 @@ p. s. but remember that ~diminish.el~ is a nice elisp file to read.
   mouse-1: Display Line and Column Mode Menu")
         (size-indication-mode
          ,(propertize
-         "/%I"
-         'local-map mode-line-column-line-number-mode-map
-         'mouse-face 'mode-line-highlight
-         'help-echo "Size indication mode\n\
+           "/%I"
+           'local-map mode-line-column-line-number-mode-map
+           'mouse-face 'mode-line-highlight
+           'help-echo "Size indication mode\n\
   mouse-1: Display Line and Column Mode Menu"))
         ;; column and line number display, leave them unchanged
         ,(assoc 'line-number-mode mode-line-position)
@@ -638,43 +750,73 @@ p. s. but remember that ~diminish.el~ is a nice elisp file to read.
   (setq mode-line-right-align-edge 'right-fringe)
 
   ;; make use of native mode-line components defined in bindings.el
-  (setq-default mode-line-format
-                `("%e"
-                  mode-line-front-space
-                  (:propertize
-                   (""
-                    ,mode-line-mule-info
-                    ,mode-line-client
-                    ,mode-line-modified
-                    ,mode-line-remote
-                    ,mode-line-window-dedicated)
-                   face mode-line-emphasis
-                   display (min-width (6.0)))
-                  mode-line-frame-identification
-                  violet-line-buffer-icon
-                  " "
-                  violet-line-buffer-identification
-                  "   "
-                  violet-line-position
-                  (project-mode-line project-mode-line-format)
-                  (vc-mode vc-mode)
-                  mode-line-format-right-align
-                  "  "
-                  violet-line-modes
-                  mode-line-misc-info
-                  mode-line-end-spaces
-                  ))
+  (defvar violet-line-format
+    `("%e"
+      mode-line-front-space
+      (:propertize
+       (""
+        ,mode-line-mule-info
+        ,mode-line-client
+        ,mode-line-modified
+        ,mode-line-remote
+        ,mode-line-window-dedicated)
+       face mode-line-emphasis
+       display (min-width (6.0)))
+      mode-line-frame-identification
+      violet-line-buffer-icon
+      " "
+      violet-line-buffer-identification
+      "   "
+      violet-line-position
+      (project-mode-line project-mode-line-format)
+      (vc-mode vc-mode)
+      mode-line-format-right-align
+      "  "
+      violet-line-modes
+      mode-line-misc-info
+      mode-line-end-spaces
+      ))
+#+end_src
+
+We have a small framework for switching between different mode line styles.
+
+#+begin_src emacs-lisp
+  (defvar my/mode-line-styles
+    '(standard-mode-line-format
+      violet-line-format
+      nil)
+    "A collection of mode line formats.")
+
+  ;; replace default mode line format
+  (setq standard-mode-line-format mode-line-format)
+  (setq-default mode-line-format violet-line-format)
+
+  (defun my:set-mode-line-style (name)
+    "Switch current `mode-line-format' to NAME.
+  With a \\[universal-argument] prefix, set it globally."
+    (interactive
+     (list (intern (completing-read "Style: " my/mode-line-styles))))
+    (eval `(,(if current-prefix-arg 'setq-default 'setq)
+            mode-line-format ,name))
+    (force-mode-line-update current-prefix-arg))
+
+  (defvar my/saved-mode-line-format violet-line-format)
+
+  (defun my:toggle-mode-line ()
+    "Hide or show the mode line."
+    (interactive)
+    (if mode-line-format
+        (progn
+          (eval `(,(if current-prefix-arg 'setq 'setq-local)
+                  my/saved-mode-line-format mode-line-format))
+          (my:set-mode-line-style nil))
+      (my:set-mode-line-style 'my/saved-mode-line-format)))
+  (keymap-global-set "C-c v m" #'my:toggle-mode-line)
 #+end_src
 
 Other useful components:
 
 #+begin_src emacs-lisp
-  (use-package hide-mode-line
-    :ensure t
-    :bind
-    ("C-c v m" . hide-mode-line-mode)
-    )
-
   (use-package keycast
     :ensure t
     :custom-face
@@ -973,6 +1115,11 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
        ("*Pp Macroexpand Output*" :noselect t)
        ("*Pp Eval Output*" :noselect t)))
 
+    (define-advice company-show-doc-buffer (:around (f &optional r))
+      ;; do not break company doc buffer
+      (popwin:without-special-displaying
+       (funcall f r)))
+
     :bind-keymap
     ("C-z" . popwin:keymap)
     :bind
@@ -1069,6 +1216,12 @@ Sideline is useful to display information related to current line.
 These are my collection, but not that important, or not used.
 
 #+begin_src emacs-lisp
+  ;; a header line for hints
+  (use-package breadcrumb
+    :ensure t
+    :hook ((my/org-mode eglot-mode) . breadcrumb-local-mode)
+    )
+
   ;; an alternative tab bar
   (use-package centaur-tabs
     :ensure t
@@ -1182,6 +1335,33 @@ A big but useless thing.
 A hacker can fly across lines and frames.
 
 #+begin_src emacs-lisp
+  (use-package windmove
+    :init
+    (windmove-mode)
+    :custom
+    (windmove-allow-all-windows t)
+    (windmove-default-keybindings '([ignore] meta))
+    (windmove-swap-states-default-keybindings '([ignore] meta shift))
+    (windmove-wrap-around nil)
+    )
+
+  (use-package winner
+    :init
+    (winner-mode)
+    )
+
+  (use-package windower
+    :ensure t
+    :bind
+    (("M-1" . windower-toggle-single)
+     ("M-2" . windower-toggle-split)
+     ("C-S-<left>"  . windower-move-border-left)
+     ("C-S-<right>" . windower-move-border-right)
+     ("C-S-<up>"    . windower-move-border-above)
+     ("C-S-<down>"  . windower-move-border-below)
+     )
+    )
+
   (use-package ace-window
     :ensure t
     :bind
@@ -1202,33 +1382,6 @@ A hacker can fly across lines and frames.
     (:map isearch-mode-map
           ("M-j" . avy-isearch))
     )
-
-  (use-package windmove
-    :init
-    (windmove-mode)
-    :custom
-    (windmove-allow-all-windows t)
-    (windmove-default-keybindings '([ignore] meta))
-    (windmove-swap-states-default-keybindings '([ignore] meta shift))
-    (windmove-wrap-around nil)
-    )
-
-  (use-package windower
-    :ensure t
-    :bind
-    (("M-1" . windower-toggle-single)
-     ("M-2" . windower-toggle-split)
-     ("C-S-<left>"  . windower-move-border-left)
-     ("C-S-<right>" . windower-move-border-right)
-     ("C-S-<up>"    . windower-move-border-above)
-     ("C-S-<down>"  . windower-move-border-below)
-     )
-    )
-
-  (use-package winner
-    :init
-    (winner-mode)
-    )
 #+end_src
 
 ** visualization
@@ -1237,12 +1390,20 @@ More previews and visual feedback.
 #+begin_src emacs-lisp
   (use-package simple
     :diminish (visual-line-mode . " 󰴐")
+    :config
+    (when my/load-gui-config-p
+      (setq visual-line-fringe-indicators '(left-curly-arrow right-curly-arrow)))
     :custom
     (word-wrap-by-category t)
     :hook
     (my/org-mode . visual-line-mode)
     :bind
     ("C-c v l" . visual-line-mode)
+    )
+
+  (use-package display-fill-column-indicator
+    :bind
+    ("C-c v i" . display-fill-column-indicator-mode)
     )
 
   (use-package visual-fill-column
@@ -1430,7 +1591,6 @@ By default ~company~ uses overlay for display completion options, which has a se
     :ensure t
     :defines (company-mode-map
               company-active-map
-              company-prefix-map
               company-backends
               company-lighter-base
               )
@@ -1472,7 +1632,17 @@ By default ~company~ uses overlay for display completion options, which has a se
     :config
     (when my/be-iconic-p (setq company-lighter-base "󰐱"))
     (when my/load-gui-config-p
-      (set-face-attribute 'company-tooltip nil :inherit 'fixed-pitch))
+      (set-face-attribute 'company-tooltip nil :inherit 'fixed-pitch)
+      ;; This can be moved to :custom for emacs-31, which supports childframe in terminal
+      (setq company-frontends
+            '(company-childframe-unless-just-one-frontend
+              company-preview-if-just-one-frontend
+              company-echo-metadata-frontend))
+      )
+    (setq company--electric-commands
+          '(scroll-other-window scroll-other-window-down mwheel-scroll
+            windmove-up windmove-down windmove-left windmove-right
+            other-window mouse-drag-region mouse-set-point))
     :custom
     (company-backends (list my/company-base-backends))
     (company-transformers '(delete-consecutive-dups
@@ -1482,30 +1652,21 @@ By default ~company~ uses overlay for display completion options, which has a se
     (company-files-exclusions '(".git/"))
     (company-format-margin-function 'company-text-icons-margin)
     (company-text-icons-add-background t)
-    (company-idle-delay 0.2)
     (company-selection-wrap-around t)
     (company-show-numbers t)
     (company-tooltip-align-annotations t)
+    (company-tooltip-flip-when-above t)
     :bind
+    (:map company-active-map
+          ("M-h" . company-show-doc-buffer)
+          ("M-g" . company-show-location)
+          ("C-h") ("<f1>"))
     (:map company-mode-map
           ("C-<tab>" . company-other-backend)
           ("C-:" . company-begin-backend))
     :hook
     (my/prog-mode . company-mode)
     (company-mode . my:select-company-backends)
-    )
-
-  (use-package company-quickhelp
-    :ensure t
-    :hook (company-mode . company-quickhelp-mode)
-    )
-
-  (use-package company-quickhelp-terminal
-    :ensure t
-    :unless my/load-gui-config-p
-    :config
-    (setq company-quickhelp-use-propertized-text nil)
-    :hook (company-quickhelp-mode . company-quickhelp-terminal-mode)
     )
 
   ;; company-math is a dependency of company-coq, may be useful.
@@ -1567,6 +1728,12 @@ By default ~company~ uses overlay for display completion options, which has a se
 They are FANTASTIC!!!
 
 #+begin_src emacs-lisp
+  (use-package paren
+    :custom (show-paren-style 'mixed)
+    :custom-face (show-paren-match-expression ((t (:inherit 'unspecified :background "#554565"))))
+    :hook (my/prog-mode . show-paren-mode)
+    )
+
   (use-package diff-hl
     :ensure t
     :when my/load-gui-config-p
@@ -1644,12 +1811,6 @@ They are FANTASTIC!!!
     :hook (my/prog-mode . highlight-parentheses-mode)
     )
 
-  (use-package paren
-    :custom (show-paren-style 'mixed)
-    :custom-face (show-paren-match-expression ((t (:inherit 'unspecified :background "#554565"))))
-    :hook (my/prog-mode . show-paren-mode)
-    )
-
   (use-package highlight-escape-sequences
     :ensure t
     :hook (my/prog-mode . hes-mode)
@@ -1669,6 +1830,16 @@ We got two backends: flycheck and flymake. Flymake is built-in but flycheck is m
 
 I prefer to use flycheck, but keep a minimal configuration for flymake.
 #+begin_src emacs-lisp
+  (use-package flymake
+    :diminish (flymake-mode . " 󱖊")
+    :bind
+    (:map flymake-mode-map
+          ("C-x ! d" . flymake-show-buffer-diagnostics)
+          ("C-x ! D" . flymake-show-project-diagnostics)
+          ("C-x ! p" . flymake-goto-prev-error)
+          ("C-x ! n" . flymake-goto-next-error))
+    )
+
   (use-package flycheck
     :ensure t
     :config
@@ -1699,16 +1870,6 @@ I prefer to use flycheck, but keep a minimal configuration for flymake.
     (:map flycheck-command-map
           ("@" . flycheck-pkg-config))
     )
-
-  (use-package flymake
-    :diminish (flymake-mode . " 󱖊")
-    :bind
-    (:map flymake-mode-map
-          ("C-x ! d" . flymake-show-buffer-diagnostics)
-          ("C-x ! D" . flymake-show-project-diagnostics)
-          ("C-x ! p" . flymake-goto-prev-error)
-          ("C-x ! n" . flymake-goto-next-error))
-    )
 #+end_src
 
 ** code document
@@ -1718,10 +1879,6 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
   (use-package eldoc
     :diminish (eldoc-mode . " 󰙎")
     :init
-    (defun my:popwin:eldoc ()
-      (interactive)
-      (popwin:popup-buffer (eldoc-doc-buffer)))
-
     (defun my:eldoc-follow-markdown-link ()
       (interactive)
       (when-let* ((url (get-text-property (point) 'help-echo)))
@@ -1731,9 +1888,14 @@ Eldoc is the bulitin code document system for emacs, it supports multiple fronte
         (:after (&rest r))
       (with-current-buffer eldoc--doc-buffer
         (keymap-local-set "RET" #'my:eldoc-follow-markdown-link)))
-    :bind
-    (:map popwin:keymap
-          ("d" . my:popwin:eldoc))
+
+    (when (bound-and-true-p popwin-mode)
+      (defun my:popwin:eldoc ()
+        (interactive)
+        (unless (buffer-live-p eldoc--doc-buffer) (eldoc))
+        (popwin:popup-buffer (eldoc-doc-buffer)))
+
+      (keymap-set popwin:keymap "d" #'my:popwin:eldoc))
     )
 
   (use-package eldoc-box
@@ -1801,12 +1963,6 @@ Emacs has introduced built-in Language Server Protocol (LSP) support since emacs
           ("C-c a" . eglot-code-actions)
           ("C-c =" . eglot-format)
           ("C-c :" . eglot-rename))
-    )
-
-  ;; a header line for hints
-  (use-package breadcrumb
-    :ensure t
-    :hook ((my/org-mode eglot-mode) . breadcrumb-local-mode)
     )
 #+end_src
 
@@ -1928,21 +2084,6 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
     :hook
     ((c-ts-mode c++-ts-mode) . my:c-ts-set-style)
     )
-
-  (use-package haskell-ts-mode
-    :ensure t
-    :custom
-    (haskell-ts-highlight-signature t)
-    :hook
-    (haskell-ts-mode . (lambda () (setq mode-name "Haskell")))
-    :bind
-    ;; use commands provided by `inferior-haskell-mode'
-    (:map haskell-ts-mode-map
-          ("C-c C-c" . haskell-compile)
-          ("C-c C-s" . haskell-hoogle)
-          ("C-c C-d" . haskell-interactive-bring)
-          ("C-c C-r" . run-haskell))
-    )
 #+end_src
 
 ** code formatter
@@ -1989,29 +2130,11 @@ With this package we can also prettify the c macro expansion, which is not prett
 #+end_src
 
 ** project management
-Since Emacs 28, Emacs has integrated ~project.el~ for project management (its keymap is bound to ~C-x p~ by default). So we don't need projectile anymore. ~projection~ provides specific support for different types of projects.
+Since Emacs 28, Emacs has integrated ~project.el~ for project management (its keymap is bound to ~C-x p~ by default). So we don't need projectile anymore.
 
-~git~ is the most popular version control tool, and ~magit~ provides the best interface for it.
+Currently, ~git~ is the most popular version control tool, and ~magit~ provides the best interface for it.
 
 #+begin_src emacs-lisp
-  (use-package projection
-    :ensure t
-    :after project
-    :init
-    (global-projection-hook-mode)
-    :bind-keymap
-    ("C-x P" . projection-map)
-    )
-
-  (use-package projection-multi
-    :ensure t
-    ;; Allow interactively selecting available compilation targets from
-    ;; the current project type.
-    :bind
-    (:map projection-map
-          ("RET" . projection-multi-compile))
-    )
-
   ;; trigger bind to `C-x g' by default
   (use-package magit :ensure t)
 
@@ -2023,13 +2146,10 @@ Since Emacs 28, Emacs has integrated ~project.el~ for project management (its ke
 ** debugger
 It is not a fashionable thing to debug in Emacs, most modern IDEs integrates their own debugger. However, that does not mean Emacs is not good at do that. Emacs has GUD (Generic Unified Debugger) as a frontend, which supports many debuggers, especially GDB.
 
-#+begin_src emacs-lisp
-  (use-package gud :diminish (gud-mode . " "))
-#+end_src
-
 Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, which is a heavy framework on Elisp.  ~dape~ uses more built-in features for integration.
 
 #+begin_src emacs-lisp
+  (use-package gud :diminish (gud-mode . " "))
   (use-package dape :ensure t)
 #+end_src
 
@@ -2037,19 +2157,6 @@ Emacs have dap support now, and ~dap-mode~ is provided by emacs-lsp, which is a 
 Most of them are not configured and deferred.
 
 #+begin_src emacs-lisp
-  (use-package gnu-apl-mode
-    :ensure t
-    :init
-    ;; exchange key prefix to 96 (backquote), which is similar to dyalog
-    (with-eval-after-load 'gnu-apl-input
-      (customize-set-variable 'gnu-apl-key-prefix ?`))
-    (with-eval-after-load 'gnu-apl-symbols
-      (setcdr (assoc "backslash-bar" gnu-apl--symbols) '("⍀" "."))
-      (setcdr (assoc "delta-underbar" gnu-apl--symbols) '("⍙" ">")))
-    :hook ((gnu-apl-mode gnu-apl-interactive-mode)
-           . (lambda () (set-input-method "APL-Z")))
-    )
-
   ;; simple configuration for C/C++ build and debug.
   (use-package emacs
     :hook
@@ -2076,6 +2183,26 @@ Most of them are not configured and deferred.
          (keymap-local-set "C-c C-d" #'gud-gdb)))
     )
 
+  (use-package inf-lisp
+    :init
+    (setq inferior-lisp-program "sbcl")
+    )
+
+  ;; Third-Party packages:
+
+  (use-package gnu-apl-mode
+    :ensure t
+    :init
+    ;; exchange key prefix to 96 (backquote), which is similar to dyalog
+    (with-eval-after-load 'gnu-apl-input
+      (customize-set-variable 'gnu-apl-key-prefix ?`))
+    (with-eval-after-load 'gnu-apl-symbols
+      (setcdr (assoc "backslash-bar" gnu-apl--symbols) '("⍀" "."))
+      (setcdr (assoc "delta-underbar" gnu-apl--symbols) '("⍙" ">")))
+    :hook ((gnu-apl-mode gnu-apl-interactive-mode)
+           . (lambda () (set-input-method "APL-Z")))
+    )
+
   (use-package tex
     :ensure auctex
     :config
@@ -2084,7 +2211,7 @@ Most of them are not configured and deferred.
           (setf (alist-get 'output-pdf TeX-view-program-selection) '("PDF Tools"))
           (add-hook 'TeX-after-compilation-finished-functions #'TeX-revert-document-buffer)
           )
-      (setf (alist-get 'output-pdf TeX-view-program-selection) '("Zathura")))
+      (setf (alist-get 'output-pdf TeX-view-program-selection) '("Okular")))
     :hook
     (TeX-mode . TeX-fold-mode)
     (TeX-mode . (lambda () (run-hooks 'my/prog-mode-hook)))
@@ -2122,6 +2249,21 @@ Most of them are not configured and deferred.
           ("C-c C-c" . haskell-compile))
     )
 
+  (use-package haskell-ts-mode
+    :ensure t
+    :custom
+    (haskell-ts-highlight-signature t)
+    :hook
+    (haskell-ts-mode . (lambda () (setq mode-name "Haskell")))
+    :bind
+    ;; use commands provided by `inferior-haskell-mode'
+    (:map haskell-ts-mode-map
+          ("C-c C-c" . haskell-compile)
+          ("C-c C-s" . haskell-hoogle)
+          ("C-c C-d" . haskell-interactive-bring)
+          ("C-c C-r" . run-haskell))
+    )
+
   (use-package pyvenv
     :ensure t
     :diminish " "
@@ -2144,11 +2286,6 @@ Most of them are not configured and deferred.
              ((d (seq-find #'my:find-python-venv
                            (my:parent-directories (buffer-file-name)))))
            (pyvenv-activate (concat d (my:find-python-venv d))))))
-    )
-
-  (use-package inf-lisp
-    :init
-    (setq inferior-lisp-program "sbcl")
     )
 
   (use-package slime
@@ -2257,6 +2394,7 @@ It is not that fashionable to send and read mails in Emacs, but it just has such
 #+begin_src emacs-lisp
   (use-package message
     :custom
+    (message-send-mail-function 'smtpmail-send-it)
     (message-directory
      (my:strong-directory (concat user-emacs-directory "Mail/")))
     )
@@ -2272,10 +2410,11 @@ It is not that fashionable to send and read mails in Emacs, but it just has such
   ;; you need to put your mail user authentication information in `auth-source'.
   (use-package smtpmail
     :custom
-    (smtpmail-smtp-user "gynamic")
+    (smtpmail-smtp-user "gynamics")
     (smtpmail-smtp-server "mail.coldbench.top")
     (smtpmail-smtp-service 587)
     (smtpmail-stream-type 'starttls)
+    (smtpmail-servers-requiring-authorization "mail\\.coldbench\\.top")
     )
 
   (use-package gnus
@@ -3003,8 +3142,8 @@ You may disable this block if you are not ready to be deliver packages to commun
 #+end_src
 
 * Epilogue
-** miscellaneous utilities
-My own packages, you can get them from github with ~vc-use-package~.
+** experimental utilities
+My own experimental packages, you can get them from github with ~vc-use-package~.
 #+begin_src emacs-lisp
   (use-package my-misc
     :vc (:url "https://github.com/gynamics/my-misc.el")
@@ -3035,133 +3174,29 @@ My own packages, you can get them from github with ~vc-use-package~.
     :vc (:url "https://github.com/gynamics/oboe.el")
     :init
     (defun my:ibuffer-oboe-absorb ()
-      "Absorb marked buffers into an OBOE temporary buffer."
+      "Absorb marked buffers into an oboe buffer."
       (interactive)
       (oboe-absorb (ibuffer-get-marked-buffers)))
     :custom
-    (oboe-default-display-method 'popwin:popup-buffer)
+    (oboe-default-display-method 'display-buffer)
     :bind
     (:map ibuffer-mode-map :package ibuffer
           ("a" . my:ibuffer-oboe-absorb))
     )
+
 #+end_src
 
-** miscellaneous configurations
+** late configurations
+These configurations should be applied later than ~use-package~ configuration blocks.
 
 #+begin_src emacs-lisp
-  (use-package man
-    :config
-    (define-advice Man-fontify-manpage (:before ())
-      (goto-char (point-min))
-      (while (re-search-forward "\x1b\\]8;;.+?\x1b\\\\\\(.+?\\)\x1b]8;;\x1b\\\\" nil t)
-        (replace-match "\\1"))
-      (goto-char (point-min)))
-    )
-
-  (use-package woman
-    :config
-    (define-advice woman-process-buffer (:before ())
-      (goto-char (point-min))
-      (while (re-search-forward "\\\\X'tty: link .+?'\\(.+?\\)\\\\X'tty: link'" nil t)
-        (replace-match "\\1"))
-      (goto-char (point-min)))
-    )
-
-  (use-package recentf
-    :init
-    (recentf-mode)
-    :custom
-    (recentf-max-saved-items 64)
-    ;; do not waste time on checking remote files
-    (recentf-keep '(file-remote-p file-readable-p))
-    )
-
-  (use-package abbrev :diminish  (abbrev-mode . " "))
-  (use-package autorevert :diminish (auto-revert-mode . " "))
-
-  (use-package face-remap
-    :diminish (buffer-face-mode . " ")
-    :hook
-    (my/prog-mode . buffer-face-mode)
-    (my/org-mode . variable-pitch-mode)
-    :bind ("C-c v b" . buffer-face-mode)
-    )
-
-  (use-package whitespace
-    :diminish (whitespace-mode . " ")
-    :bind ("C-c v SPC" . whitespace-mode)
-    )
-
-  (use-package prog-mode
-    :hook
-    (my/prog-mode . prettify-symbols-mode)
-    (my/prog-mode . display-line-numbers-mode)
-    (my/prog-mode
-     . (lambda () ;; cleanup whitespaces on save.
-         (add-hook 'before-save-hook ;; make it buffer-local
-                   #'(lambda () (whitespace-cleanup)) nil t)))
-    )
-
-  (use-package pp
-    :init
-    (define-advice pp-display-expression
-        (:override (expression out-buffer-name &optional lisp))
-      "A hacked version which always use `popwin:popup-buffer' for display."
-      (let* ((lexical lexical-binding)
-             (old-show-function temp-buffer-show-function)
-             (temp-buffer-show-function #'popwin:popup-buffer))
-        (with-output-to-temp-buffer out-buffer-name
-          (if lisp
-              (with-current-buffer standard-output
-                (pp-emacs-lisp-code expression))
-            (pp expression))
-          (with-current-buffer standard-output
-            (emacs-lisp-mode)
-            (setq lexical-binding lexical)
-            (setq buffer-read-only nil)
-            (setq-local font-lock-verbose nil)))))
-    )
-
-  ;; some general configurations
-  (use-package emacs
-    :custom
-    (blink-cursor-mode nil)
-    (buffer-face-mode-face 'default)
-    (column-number-mode t)
-    (delete-by-moving-to-trash t)
-    (fill-column 80)
-    (indent-tabs-mode nil)
-    (inhibit-startup-screen t)
-    (native-comp-async-report-warnings-errors nil)
-    (prettify-symbols-unprettify-at-point 'right-edge)
-    (scroll-bar-mode nil)
-    (size-indication-mode t)
-    (tab-always-indent t)
-    (tool-bar-mode nil)
-    (undo-limit (expt 2 20))
-    ;; do not make backups
-    (make-backup-files nil)
-    ;; or, save backups in a specific directory if necessary
-    ;; (backup-directory-alist
-    ;;  `(("." . ,(concat user-emacs-directory "backups")))
-    :bind
-    ([remap list-buffers]    . ibuffer)
-    ([remap eval-last-sexp]  . pp-eval-last-sexp)
-    ([remap eval-expression] . pp-eval-expression)
-    ([remap dabbrev-expand]  . hippie-expand)
-    ("C-x M-e" . pp-macroexpand-last-sexp)
-    ("C-x M-s" . macrostep-mode)
-    ("C-x M-." . xref-find-definitions)
-    )
+  (unless my/load-gui-config-p
+    (setq browse-url-browser-function #'eww-browse-url))
 
   ;; update list of selected packages
   (setq
    package-selected-packages use-package-selected-packages
    package-vc-selected-packages use-package-vc-selected-packages)
-
-  ;; enable some disabled functions
-  (put 'downcase-region 'disabled nil) ;; C-x C-l
-  (put 'upcase-region 'disabled nil)   ;; C-x C-u
 #+end_src
 
 ** footer
