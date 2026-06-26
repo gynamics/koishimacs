@@ -33,7 +33,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.12.0
+  ;; Version: 5.12.1
 
   ;;; Commentary:
 
@@ -1845,6 +1845,8 @@ I prefer to use flycheck, but keep a minimal configuration for flymake.
          (when (member (buffer-name)
                        '("*Pp Eval Output*" "*Pp Macroexpand Output*"))
            (flycheck-mode -1))))
+    (c-mode . (lambda () (setopt flycheck-cppcheck-checks '("performance"))))
+    (rust-mode . (lambda () (setopt flycheck-rust-crate-type nil)))
     )
 
   (use-package flycheck-eglot
@@ -1965,57 +1967,58 @@ Tree-sitter is a parser generator for creating *incremental* parsers, which prov
 Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitter][this article]].
 
 #+begin_src emacs-lisp
-  (setq treesit-language-source-alist
-        '((bash "https://github.com/tree-sitter/tree-sitter-bash")
-          (c "https://github.com/tree-sitter/tree-sitter-c")
-          (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
-          (cmake "https://github.com/uyha/tree-sitter-cmake")
-          (css "https://github.com/tree-sitter/tree-sitter-css")
-          (go "https://github.com/tree-sitter/tree-sitter-go")
-          (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
-          (html "https://github.com/tree-sitter/tree-sitter-html")
-          (java "https://github.com/tree-sitter/tree-sitter-java")
-          (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
-          (json "https://github.com/tree-sitter/tree-sitter-json")
-          (lua "https://github.com/tree-sitter-grammars/tree-sitter-lua")
-          (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
-          (rust "https://github.com/tree-sitter/tree-sitter-rust")
-          (python "https://github.com/tree-sitter/tree-sitter-python")
-          (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
-          (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
-          (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
-
-  (setq major-mode-remap-alist
-        '((sh-mode . bash-ts-mode)
-          (c-mode . c-ts-mode)
-          (c++-mode . c++-ts-mode)
-          (css-mode . css-ts-mode)
-          (haskell-mode . haskell-ts-mode)
-          (html-mode . html-ts-mode)
-          (java-mode . java-ts-mode)
-          (javascript-mode . js-ts-mode)
-          (js-json-mode . json-ts-mode)
-          (lua-mode . lua-ts-mode)
-          (python-mode . python-ts-mode)
-          (ruby-mode . ruby-ts-mode)
-          (rust-mode . rust-ts-mode)))
-
-  ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
-  (mapc
-   #'(lambda (major-mode-remap)
-       (let ((major-mode-hook
-              (intern (concat (symbol-name (car major-mode-remap)) "-hook")))
-             (major-ts-mode-hook
-              (intern (concat (symbol-name (cdr major-mode-remap)) "-hook"))))
-         (add-hook major-ts-mode-hook
-                   `(lambda () (run-hooks ',major-mode-hook)))))
-   major-mode-remap-alist)
-
   ;; We may enable some built-in treesit modes directly to be lazy
   (use-package treesit
     :custom
     (treesit-font-lock-level 4) ;; as colorful as possible
     :init
+    (setq treesit-language-source-alist
+          '((bash "https://github.com/tree-sitter/tree-sitter-bash")
+            (c "https://github.com/tree-sitter/tree-sitter-c")
+            (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
+            (cmake "https://github.com/uyha/tree-sitter-cmake")
+            (css "https://github.com/tree-sitter/tree-sitter-css")
+            (go "https://github.com/tree-sitter/tree-sitter-go")
+            (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
+            (html "https://github.com/tree-sitter/tree-sitter-html")
+            (java "https://github.com/tree-sitter/tree-sitter-java")
+            (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
+            (json "https://github.com/tree-sitter/tree-sitter-json")
+            (lua "https://github.com/tree-sitter-grammars/tree-sitter-lua")
+            (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
+            (rust "https://github.com/tree-sitter/tree-sitter-rust")
+            (python "https://github.com/tree-sitter/tree-sitter-python")
+            (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
+            (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
+            (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
+
+    (setopt major-mode-remap-alist
+            '((sh-mode . bash-ts-mode)
+              (c-mode . c-ts-mode)
+              (c++-mode . c++-ts-mode)
+              (css-mode . css-ts-mode)
+              (haskell-mode . haskell-ts-mode)
+              (html-mode . html-ts-mode)
+              (java-mode . java-ts-mode)
+              (javascript-mode . js-ts-mode)
+              (js-json-mode . json-ts-mode)
+              (lua-mode . lua-ts-mode)
+              (python-mode . python-ts-mode)
+              (ruby-mode . ruby-ts-mode)
+              (rust-mode . rust-ts-mode)))
+
+    ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
+    (mapc
+     #'(lambda (major-mode-remap)
+         (let ((major-mode-hook
+                (intern (concat (symbol-name (car major-mode-remap)) "-hook")))
+               (major-ts-mode-hook
+                (intern (concat (symbol-name (cdr major-mode-remap)) "-hook"))))
+           (add-hook major-ts-mode-hook
+                     `(lambda () (run-hooks ',major-mode-hook)))))
+     major-mode-remap-alist)
+
+    ;; enable *-ts-mode by default for those languages without *-mode support
     (defun my:auto-ts-mode (language regexp &optional func)
       (add-to-list 'auto-mode-alist
                    `(,regexp . ,(or func (intern (concat (symbol-name language) "-ts-mode"))))))
@@ -2023,9 +2026,11 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
     (mapc
      (lambda (conf) (apply #'my:auto-ts-mode conf))
      '((cmake "\\(?:CMakeLists\\.txt\\|\\.cmake\\)\\'")
-       (yaml "\\.ya?ml\\'")
+       (rust "\\.rs\\'")
+       (lua "\\.lua\\'")
        (typescript "\\.ts\\'")
        (typescript "\\.tsx\\'" tsx-ts-mode)
+       (yaml "\\.ya?ml\\'")
        ))
     )
 
@@ -2077,6 +2082,11 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
           ([remap c-ts-mode-set-style] . my:c-ts-set-style))
     :hook
     ((c-ts-mode c++-ts-mode) . my:c-ts-set-style)
+    )
+
+  (use-package lua-ts
+    :init
+    (defalias 'run-lua 'lua-ts-inferior-lua)
     )
 #+end_src
 
@@ -2397,13 +2407,11 @@ Most of them are not configured and deferred.
   (use-package disaster :ensure t)
   (use-package gnuplot :ensure t)
   (use-package graphviz-dot-mode :ensure t)
-  (use-package lua-mode :ensure t)
+  ;; Maxima's built-in emacs plugin has been deprecated, use this newer one
   (use-package maxima :ensure t)
   (use-package tuareg :ensure t)
   (use-package proof-general :ensure t)
   (use-package riscv-mode :ensure t)
-  (use-package rust-mode :ensure t)
-  (use-package typescript-mode :ensure t)
 #+end_src
 
 * Org Editor
