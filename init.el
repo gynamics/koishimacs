@@ -29,10 +29,6 @@
 
 ;;; Code:
 
-;; feel free to set a larger gc-cons-threshold
-(setq gc-cons-threshold (expt 2 26)
-      gc-cons-percentage 0.15)
-
 (custom-set-variables
  ;; custom-set-variables was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.

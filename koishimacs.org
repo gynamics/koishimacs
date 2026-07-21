@@ -1,6 +1,6 @@
 #+title: Emacs Literate Startup
 #+author: gynamics
-#+date: <2025-07-21 Mon>
+#+date: <2026-07-21 Tue>
 #+property: header-args :tangle yes
 
 * Prelude
@@ -33,7 +33,7 @@ This is the header of generated file:
   ;;; koishimacs.el --- auto-generated configuration -*- lexical-binding: t -*-
 
   ;; Author: gynamics
-  ;; Version: 5.12.1
+  ;; Version: 6.0.0
 
   ;;; Commentary:
 
@@ -43,7 +43,7 @@ This is the header of generated file:
   ;;; Code:
 
   ;; check if current Emacs version supports this configuration
-  (when (< emacs-major-version 30)
+  (when (< emacs-major-version 31)
     (error "This Emacs version is not supported"))
 #+end_src
 
@@ -84,7 +84,7 @@ There are several helpers help create or neglect missing files in initialization
       (condition-case nil
           (make-directory dir parents)
         (:success dir)
-        (error "failed to create directory %s" dir))))
+        (error (error "failed to create directory %s" dir)))))
 
   (defun my:weak-directory (dir)
     "Return DIR, if it does not exist return nil."
@@ -139,10 +139,7 @@ However, if we start a subprocess from emacs, it uses environment variables inhe
      (my:weak-directory (concat home ".ghcup/bin"))
      (my:weak-directory (concat home ".cabal/bin"))
      ;; for rust
-     (my:weak-directory (concat home ".cargo/bin"))
-     ;; for ruby
-     (when (executable-find "gem")
-       (shell-command-to-string "gem env user_gemhome | tr -d \"\\n\"")))
+     (my:weak-directory (concat home ".cargo/bin")))
 
     ;; set additional environment variables
     (mapc
@@ -441,6 +438,7 @@ Miscellaneous configurations for built-in packages, we should load them earlier 
     (fill-column 80)
     (indent-tabs-mode nil)
     (inhibit-startup-screen t)
+    (jit-lock-chunk-size 4096)
     (native-comp-async-report-warnings-errors nil)
     (prettify-symbols-unprettify-at-point 'right-edge)
     (scroll-bar-mode nil)
@@ -803,7 +801,8 @@ We have a small framework for switching between different mode line styles.
   (defvar my/saved-mode-line-format violet-line-format)
 
   (defun my:toggle-mode-line ()
-    "Hide or show the mode line."
+    "Hide or show the mode line in current buffer.
+  With a \\[universal-argument] prefix, toggle it globally."
     (interactive)
     (if mode-line-format
         (progn
@@ -1158,6 +1157,12 @@ Since ~embark~ already has an ~embark-export~ that makes use of ~occur-mode~, we
       (interactive "P")
       (my:popwin:toggle (my:vterm--buffer-name arg)
                         (my:popwin:vterm arg)))
+
+    (defun my:follow-vterm-cwd ()
+      "Make emacs follow vterm's current work directory."
+      (interactive)
+      (cd (file-truename
+           (format "/proc/%d/cwd" (process-id vterm--process)))))
     :bind
     (("C-`" . my:popwin:vterm-toggle)
      :map popwin:keymap
@@ -1215,6 +1220,18 @@ Sideline is useful to display information related to current line.
     )
 #+end_src
 
+** xwidget
+~xwidget~ allow us to open webkit windows in Emacs GUI, this is a magnificent work, which nested a modern web browser kit in Emacs. I don't use koishimacs as my desktop and xwidget is not enabled by default, but this really brings a lot of fun.
+
+#+begin_src emacs-lisp
+  (use-package xwidget
+    :when (and (featurep 'xwidget-internal) my/load-gui-config-p)
+    :bind
+    (:map xwidget-webkit-edit-mode-map
+          ("C-c C-t" . (lambda () (interactive) (xwidget-webkit-edit-mode -1))))
+    )
+#+end_src
+
 ** other widgets
 These are my collection, but not that important, or not used.
 
@@ -1244,10 +1261,30 @@ These are my collection, but not that important, or not used.
     ("C-S-<prior>" . centaur-tabs-backward-group)
     )
 
-  ;; a fake mini code scroll map, with bad efficiency
-  (use-package minimap
-    :ensure t
-    :when my/load-gui-config-p
+  ;; a sidebar that is never ready for use
+  (use-package speedbar
+    :custom
+    (speedbar-window-default-width 30)
+    :custom-face
+    (speedbar-button-face ((t :inherit button)))
+    (speedbar-directory-face ((t :inherit font-lock-function-name-face)))
+    (speedbar-file-face ((t :inherit default)))
+    (speedbar-highlight-face ((t :inherit highlight)))
+    (speedbar-selected-face ((t :inherit secondary-selection)))
+    (speedbar-separator-face ((t :inherit font-lock-punctuation-face)))
+    (speedbar-tag-face ((t :inherit font-lock-builtin-face)))
+    :config
+    (defun my:speedbar-help ()
+      (interactive)
+      (let ((buf (current-buffer)))
+        (other-window 1)
+        (describe-bindings nil buf)))
+    :bind
+    ("C-S-b" . speedbar-window)
+    (:map speedbar-mode-map
+          ("TAB" . speedbar-toggle-line-expansion)
+          ("q" . delete-window)
+          ("?" . my:speedbar-help))
     )
 
 #+end_src
@@ -1592,11 +1629,12 @@ By default ~company~ uses overlay for display completion options, which has a se
 #+begin_src emacs-lisp
   (use-package company
     :ensure t
-    :defines (company-mode-map
-              company-active-map
-              company-backends
-              company-lighter-base
-              )
+    :defines
+    (company-mode-map
+     company-active-map
+     company-backends
+     company-lighter-base
+     )
     :preface
     (defvar my/company-base-backends
       '(company-capf company-files company-yasnippet))
@@ -1723,7 +1761,7 @@ They are FANTASTIC!!!
 #+begin_src emacs-lisp
   (use-package paren
     :custom (show-paren-style 'mixed)
-    :custom-face (show-paren-match-expression ((t (:inherit 'unspecified :background "#554565"))))
+    :custom-face (show-paren-match-expression ((t (:inherit unspecified :background "#554565"))))
     :hook (my/prog-mode . show-paren-mode)
     )
 
@@ -1842,9 +1880,11 @@ I prefer to use flycheck, but keep a minimal configuration for flymake.
     (my/prog-mode . flycheck-mode)
     (emacs-lisp-mode
      . (lambda ()
-         (when (member (buffer-name)
-                       '("*Pp Eval Output*" "*Pp Macroexpand Output*"))
-           (flycheck-mode -1))))
+         (cond
+          ((member (buffer-name) '("*Pp Eval Output*" "*Pp Macroexpand Output*"))
+           (flycheck-mode -1))
+          ((not (buffer-file-name))
+           (flycheck-disable-checker 'emacs-lisp-checkdoc)))))
     (c-mode . (lambda () (setopt flycheck-cppcheck-checks '("performance"))))
     (rust-mode . (lambda () (setopt flycheck-rust-crate-type nil)))
     )
@@ -1948,10 +1988,6 @@ Emacs has introduced built-in Language Server Protocol (LSP) support since emacs
   (use-package eglot
     :custom
     (eglot-stay-out-of '(company))
-    :config
-    ;; currently haskell-ts-mode is not supported yet
-    (setf (alist-get 'haskell-ts-mode eglot-server-programs)
-          '("haskell-language-server-wrapper" "--lsp"))
     :bind
     (:map eglot-mode-map
           ("C-c a" . eglot-code-actions)
@@ -1964,48 +2000,21 @@ Finally we get something cooler in emacs29+, treesit is merged into emacs!
 
 Tree-sitter is a parser generator for creating *incremental* parsers, which provides us many efficient language parsers for syntactic highlighting, code alignment and navigation, etc.
 
-Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tree-sitter][this article]].
-
 #+begin_src emacs-lisp
   ;; We may enable some built-in treesit modes directly to be lazy
   (use-package treesit
     :custom
     (treesit-font-lock-level 4) ;; as colorful as possible
+    (treesit-enable-modes t)
     :init
-    (setq treesit-language-source-alist
-          '((bash "https://github.com/tree-sitter/tree-sitter-bash")
-            (c "https://github.com/tree-sitter/tree-sitter-c")
-            (cpp "https://github.com/tree-sitter/tree-sitter-cpp")
-            (cmake "https://github.com/uyha/tree-sitter-cmake")
-            (css "https://github.com/tree-sitter/tree-sitter-css")
-            (go "https://github.com/tree-sitter/tree-sitter-go")
-            (haskell "https://github.com/tree-sitter/tree-sitter-haskell")
-            (html "https://github.com/tree-sitter/tree-sitter-html")
-            (java "https://github.com/tree-sitter/tree-sitter-java")
-            (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "master" "src")
-            (json "https://github.com/tree-sitter/tree-sitter-json")
-            (lua "https://github.com/tree-sitter-grammars/tree-sitter-lua")
-            (ruby "https://github.com/tree-sitter/tree-sitter-ruby")
-            (rust "https://github.com/tree-sitter/tree-sitter-rust")
-            (python "https://github.com/tree-sitter/tree-sitter-python")
-            (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "master" "tsx/src")
-            (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master" "typescript/src")
-            (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
-
-    (setopt major-mode-remap-alist
-            '((sh-mode . bash-ts-mode)
-              (c-mode . c-ts-mode)
-              (c++-mode . c++-ts-mode)
-              (css-mode . css-ts-mode)
-              (haskell-mode . haskell-ts-mode)
-              (html-mode . html-ts-mode)
-              (java-mode . java-ts-mode)
-              (javascript-mode . js-ts-mode)
-              (js-json-mode . json-ts-mode)
-              (lua-mode . lua-ts-mode)
-              (python-mode . python-ts-mode)
-              (ruby-mode . ruby-ts-mode)
-              (rust-mode . rust-ts-mode)))
+    (setq major-mode-remap-alist
+          '((c-mode . c-ts-mode)
+            (c++-mode . c++-ts-mode)
+            (haskell-mode . haskell-ts-mode)
+            (java-mode . java-ts-mode)
+            (javascript-mode . js-ts-mode)
+            (js-json-mode . json-ts-mode)
+            (python-mode . python-ts-mode)))
 
     ;; append *-mode-hook to *-ts-mode-hook for modes in `major-mode-remap-list'
     (mapc
@@ -2017,21 +2026,6 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
            (add-hook major-ts-mode-hook
                      `(lambda () (run-hooks ',major-mode-hook)))))
      major-mode-remap-alist)
-
-    ;; enable *-ts-mode by default for those languages without *-mode support
-    (defun my:auto-ts-mode (language regexp &optional func)
-      (add-to-list 'auto-mode-alist
-                   `(,regexp . ,(or func (intern (concat (symbol-name language) "-ts-mode"))))))
-
-    (mapc
-     (lambda (conf) (apply #'my:auto-ts-mode conf))
-     '((cmake "\\(?:CMakeLists\\.txt\\|\\.cmake\\)\\'")
-       (rust "\\.rs\\'")
-       (lua "\\.lua\\'")
-       (typescript "\\.ts\\'")
-       (typescript "\\.tsx\\'" tsx-ts-mode)
-       (yaml "\\.ya?ml\\'")
-       ))
     )
 
   ;; c-ts-mode has a rough indentation setting compared to cc-mode
@@ -2042,51 +2036,48 @@ Mostly following [[https://www.masteringemacs.org/article/how-to-get-started-tre
     (require 'cc-mode)
     (defun my:c-ts-set-style (&optional style)
       "Detect and setup C indentation STYLE for `c-ts-mode'."
-      (interactive
-       (list (completing-read
-              "Style: " (mapcar #'car (c-ts-mode--indent-styles major-mode)))))
+      (interactive (list (c-ts-mode--prompt-for-style)))
       ;; detect file mode with cc-mode
       (if style
           (c-ts-mode-set-style style)
-        ;; else detect style with `c-guess-buffer'
-        (let ((is-c++-p (eq major-mode 'c++-ts-mode))
-              (guessed-offset))
-          (unless (bound-and-true-p c-ts-set-style--reentry)
-            (if (or is-c++-p
-                    (save-excursion
-                      (save-restriction
-                        (save-match-data
-                          (widen)
-                          (goto-char (point-min))
-                          (re-search-forward c-or-c++-mode--regexp
-                                             (+ (point) 4096) t)))))
-                (progn
-                  (setq is-c++-p t)
-                  (c++-mode))
-              (c-mode))
-            (setq guessed-offset
-                  (condition-case nil
-                      (c-guess-buffer)
-                    (:success c-guess-guessed-basic-offset)
-                    ;; catch error if guess failed
-                    (error (message "Guess failed, fallback to 2.") 2)))
-            ;; mask this hook function when reentry ts mode
-            (dlet ((c-ts-set-style--reentry t))
-              (if is-c++-p (c++-ts-mode) (c-ts-mode)))
-            (setq-local c-ts-mode-indent-offset guessed-offset))))
+        ;; else detect style with `c-guess'
+        (progn
+          (cond ((eq major-mode 'c-ts-mode) (c-mode))
+                ((eq major-mode 'c++-ts-mode) (c++-mode))
+                (t (c-or-c++-mode)))
+          (condition-case nil
+              (c-guess)
+            (:success
+             (setq-local c-ts-indent-offset c-guess-guessed-basic-offset))
+            (error (message "Use default indent=%d" c-ts-indent-offset)))
+          (cond ((eq major-mode 'c-mode) (c-ts-mode))
+                ((eq major-mode 'c++-mode) (c++-ts-mode)))))
       ;; refresh indent bars
       (when (bound-and-true-p indent-bars-mode)
         (indent-bars-reset)))
+
+    (defun my--c-ts-guess-style ()
+      (unless (bound-and-true-p my/c-ts--guessed)
+        ;; we must use lexical bindings here, because setq-local is in mode context
+        (dlet ((my/c-ts--guessed t))
+          (my:c-ts-set-style))))
     :bind
     (:map c-ts-base-mode-map
           ([remap c-ts-mode-set-style] . my:c-ts-set-style))
     :hook
-    ((c-ts-mode c++-ts-mode) . my:c-ts-set-style)
+    ((c-ts-mode c++-ts-mode) . my--c-ts-guess-style)
     )
 
-  (use-package lua-ts
+  (use-package lua-ts-mode
     :init
     (defalias 'run-lua 'lua-ts-inferior-lua)
+    )
+
+  (use-package markdown-ts-mode
+    :mode ("\\.\\(?:md\\|markdown\\|mkd\\|mdown\\|mkdn\\|mdwn\\|mdx\\)\\'" . markdown-ts-mode)
+    :bind
+    (:map markdown-ts-mode-map
+          ("C-c C-x C-l" . org-latex-preview))
     )
 #+end_src
 
@@ -2106,13 +2097,12 @@ With this package we can also prettify the c macro expansion, which is not prett
     (format-all-formatters '(("Shell" (shfmt "-i" "4"))))
     :bind
     (:map prog-mode-map
-          ("C-x C-<tab>" . format-all-region)
-          ("C-c C-<tab>" . format-all-buffer)
+          ("C-c TAB" . format-all-region-or-buffer)
           )
     )
 
   (use-package cmacexp
-    :functions (my:c-macro-expand)
+    :commands (my:c-macro-expand)
     :config
     (defun my:c-macro-expand (start end subst)
       "Pass (START END SUBST) to c-macroexpand and format the output buffer."
@@ -2259,7 +2249,12 @@ Most of them are not configured and deferred.
 
   (use-package haskell-ts-mode
     :ensure t
+    :init
+    (when (boundp 'treesit-major-mode-remap-alist)
+      (add-to-list 'treesit-major-mode-remap-alist
+                   '(haskell-mode . haskell-ts-mode)))
     :custom
+    (haskell-ts-use-indent t)
     (haskell-ts-highlight-signature t)
     :hook
     (haskell-ts-mode . (lambda () (setq mode-name "Haskell")))
@@ -2291,8 +2286,8 @@ Most of them are not configured and deferred.
      . (lambda ()
          (pyvenv-mode)
          (when-let*
-             ((d (seq-find #'my:find-python-venv
-                           (my:parent-directories (buffer-file-name)))))
+             ((f (buffer-file-name))
+              (d (seq-find #'my:find-python-venv (my:parent-directories f))))
            (pyvenv-activate (concat d (my:find-python-venv d))))))
     )
 
@@ -2342,17 +2337,6 @@ Most of them are not configured and deferred.
     :hook (nxml-mode . auto-rename-tag-mode)
     )
 
-  (use-package markdown-mode
-    :ensure t
-    :mode ("README\\.md\\'" . gfm-mode)
-    :custom
-    (markdown-fontify-code-blocks-natively t)
-    :bind
-    (:map markdown-mode-map
-          ("C-c C-x C-u" . markdown-toggle-url-hiding)
-          ("C-c C-x C-l" . org-latex-preview))
-    )
-
   (use-package geiser
     :ensure t
     :defines my:geiser-file-path
@@ -2386,21 +2370,6 @@ Most of them are not configured and deferred.
     :ensure t
     :custom
     (plantuml-default-exec-mode 'executable)
-    )
-
-  (use-package web-mode
-    :ensure t
-    :mode
-    ;; currently mhtml-mode is broken, mhtml-ts-mode hasn't been released
-    ;; let's use web-mode instead
-    (("\\.html\\'" . web-mode)
-     ("\\.phtml\\'" . web-mode)
-     ("\\.tpl\\.php\\'" . web-mode)
-     ("\\.[agj]sp\\'" . web-mode)
-     ("\\.as[cp]x\\'" . web-mode)
-     ("\\.erb\\'" . web-mode)
-     ("\\.mustache\\'" . web-mode)
-     ("\\.djhtml\\'" . web-mode))
     )
 
   (use-package bison-mode :ensure t)
@@ -2550,30 +2519,30 @@ It is really interesting to write ~org-mode~ configurations in an org document.
     (org-todo-keyword-faces '(("PEND" . (:inherit fixed-pitch :foreground "#7FAFF0" :weight bold))))
     (org-use-sub-superscripts nil)
     :config
-    ;; pdflatex is not very efficient, but only pdflatex supports tikz
+    ;; xelatex is not very efficient, but only pdflatex supports tikz
     ;; original configuration use magick, but dvisvgm actually supports pdf
     (setf
-     (alist-get 'dvisvgm-pdf org-preview-latex-process-alist)
-     '(:programs ("latex" "dvisvgm") :description "pdf > svg"
-       :message "you need to install the programs: latex and dvisvgm."
+     (alist-get 'xelatex-pdf org-preview-latex-process-alist)
+     '(:programs ("xelatex" "dvisvgm") :description "pdf > svg"
+       :message "you need to install the programs: xelatex and dvisvgm."
        :image-input-type "pdf" :image-output-type "svg"
-       :image-size-adjust (1.0 . 1.0)
+       :image-size-adjust (1.7 . 1.5)
        :latex-compiler
-       ("pdflatex -interaction nonstopmode -output-directory %o %f")
+       ("xelatex -interaction nonstopmode -output-directory %o %f")
        :image-converter
        ("pdfcrop %f %f"
         "dvisvgm --pdf --no-fonts --exact --scale=%S %f --output=%O")))
 
-    (setq org-preview-latex-default-process 'dvisvgm-pdf)
+    (setq org-preview-latex-default-process 'xelatex-pdf)
 
     ;; This must be deferred after `org-preview-latex-process-alist' is set
     (org-babel-do-load-languages
      'org-babel-load-languages
      '((emacs-lisp . t) (gnuplot . t) (plantuml . t) (dot . t) (shell . t) (latex . t) (lilypond . t)))
 
-    ;; patch for org-9.7.* to display transparent png image.
     ;; it seems there is an Emacs bug to display transparency.
-    (when (<= (string-to-number org-version) 9.7)
+    ;; in emacs 31, my hotfix patch was not merged, and the display problem was still not solved.
+    (when (<= (string-to-number org-version) 9.8)
       (define-advice org--make-preview-overlay
           (:override (beg end image &optional imagetype))
         "Build an overlay between BEG and END using IMAGE file.
@@ -3010,7 +2979,7 @@ These applications are actually desktop-level, BTW I use Emacs.
      ;; <tab> always translates to TAB by default
      ;; but C-<tab> won't translate to C-TAB
      ("TAB" . dirvish-subtree-toggle)
-     ("C-<tab>" . dirvish-layout-toggle)
+     ("<backtab>" . dirvish-layout-toggle)
      ("<" . dirvish-history-last)
      (">" . dirvish-history-jump)
      ("?" . dirvish-dispatch)
@@ -3048,33 +3017,13 @@ These applications are actually desktop-level, BTW I use Emacs.
     :config
     (setopt ellama-auto-scroll t)
     (setopt ellama-language "Chinese")
+    ;; Here we use ollama + qwen3.6 as default configuration.
     (require 'llm-ollama)
-    ;; Here we use Qwen3-30B-A3B MoE model with default configuration.
-    (setopt ellama-provider
-            (make-llm-ollama
-             :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
-             :embedding-model "qwen3-embedding:latest"
-             :default-chat-non-standard-params '(("num_ctx" . 262144))))
-    (setopt ellama-summarization-provider
-            (make-llm-ollama
-             :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
-             :embedding-model "qwen3-embedding:latest"
-             :default-chat-non-standard-params '(("num_ctx" . 262144))))
-    (setopt ellama-coding-provider
-            (make-llm-ollama
-             :chat-model "qwen3-coder:latest"
-             :embedding-model "qwen3-embedding:latest"
-             :default-chat-non-standard-params '(("num_ctx" . 262144))))
-    (setopt ellama-translation-provider
-            (make-llm-ollama
-             :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
-             :embedding-model "qwen3-embedding:latest"
-             :default-chat-non-standard-params '(("num_ctx" . 262144))))
-    (setopt ellama-extraction-provider
-            (make-llm-ollama
-             :chat-model "alibayram/Qwen3-30B-A3B-Instruct-2507:latest"
-             :embedding-model "qwen3-embedding:latest"
-             :default-chat-non-standard-params '(("num_ctx" . 262144))))
+    (let ((m (make-llm-ollama
+              :chat-model "qwen3.6"
+              :embedding-model "qwen3-embedding:latest"
+              :default-chat-non-standard-params '(("num_ctx" . 262144)))))
+      (setopt ellama-provider m))
     ;; show ellama context in header line in all buffers
     (ellama-context-header-line-global-mode +1)
     ;; show ellama session id in header line in all buffers
@@ -3264,14 +3213,4 @@ These configurations should be applied later than ~use-package~ configuration bl
 #+end_src
 
 ** postscript
-Evaluate these expressions after bootstrap to complete the installation, never tangle this block!
-
-#+begin_src emacs-lisp :tangle no
-  ;; install font for `nerd-icons'
-  (nerd-icons-install-fonts)
-
-  ;; run this code once to install all treesit libraries at once (not necessary)
-  (mapc #'treesit-install-language-grammar
-        (mapcar #'car treesit-language-source-alist))
-
-#+end_src
+Nothing.
