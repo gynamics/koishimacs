@@ -1,6 +1,6 @@
 #+title: Koishimacs
 #+author: gynamics
-#+date: 2025:09:25
+#+date: 2026:07:30
 
 Prepare to lose your mind in Emacs!
 
@@ -8,6 +8,15 @@ Prepare to lose your mind in Emacs!
 My personal Emacs configuration.
 
 Read [[file:koishimacs.org::*preface][koishimacs.org:Prelude:preface]] if you are interested in my ideas.
+
+* Compatibility
+The latest version is always recommended. We don't have a release flow, you can simply checkout to a new branch, and rebase to a previous commit. However, the MELPA packages are not guarded to be compatible to older versions.
+
+| koishimacs version | emacs-version |
+|--------------------+---------------|
+| 5.0.0 - 5.4.0      |            29 |
+| 5.5.0 - 5.12.1     |            30 |
+| 6.0.0 - latest     |            31 |
 
 * Screenshots
 
@@ -22,13 +31,13 @@ TUI
 * Features
 - A sweet logo (hand-drawn, original character by /Team Shanghai Alice/)
 - A sweet theme ([[https://github.com/gynamics/koishi-theme.el][koishi-theme]] designed by gynamics)
-- A minimal literate startup framework, all in one org document.
+- A minimal literate startup framework with modular configuration, all in one org document.
 - Quick deployment (see [[*Bootstrap][Bootstrap]]).
 - Use built-in ~package.el~ for package fetching and management.
 - Out of the box as a powerful text editor, IDE or org editor.
 - Comes with Unicode font GUI configuration (especially Chinese).
-- Starts up fast, GUI starts up in no more than 2 seconds on a modern machine.
-- Even faster in terminal.
+- Starts up fast, GUI starts up in no more than 1 second on a modern machine.
+- Even faster in terminal (~0.5s).
 - Configured as a multi-frame editor when working in daemon mode.
 
 * Bootstrap
@@ -54,11 +63,20 @@ TUI
 
 4. Finally, do remaining steps to complete the installation. There is an untangled block at [[file:koishimacs.org::*postscript][koishimacs.org:postscript]] that does these things.
 
-- Currently koishimacs uses [[https://dejavu-fonts.github.io/][DejaVu Fonts]] as its default font.
+- Currently koishimacs uses [[https://dejavu-fonts.github.io/][DejaVu Fonts]] and [[https://www.gnu.org/software/freefont/][GNU Free Fonts]] as its default fontset.
 - There may be some external program dependencies, like ~ripgrep~, ~global~ or ~curl~. Most of them are not necessary for basic usage, install them on yourselves if you need.
-- [[https://www.nerdfonts.com][nerd-fonts]] is highly recommended for display various icons. ~Symbols Nerd Font~ covers most Unicode icons used. As for Chinese font, the default Chinese font I use is ~LXGW Wenkai Mono~.
+- [[https://www.nerdfonts.com][nerd-fonts]] is highly recommended for display various icons. ~Symbols Nerd Font~ covers most Unicode icons used.
+- As for Chinese/Japanese font, I use is [[https://github.com/lxgw/LxgwWenkai][LXGW Wenkai Mono]], which is derived from [[https://github.com/fontworks-fonts/Klee][Klee One]] by Fontworks Inc. .
+
+* Hints
+- ~C-z~ is left for ~popwin:keymap~, press ~C-z C-z~ for ~suspend-emacs~.
+- Run ~M-x describe-personal-keybindings~ to have a look at our armory.
+- LSP is not enabled by default, because it can be slow in very large projects.
+  Run ~M-x eglot~ to activate it.
 
 * Maintenance
 The mainline code will keep updating on my personal taste, fork it if you could be inspired, to some degree. Do *NOT* pull it, it is not meant to have a contiguous integration process.
+
+Koishimacs doesn't care about backward-compatibility, if you want to run it on an older Emacs version, you can rebase to a cutoff commit. However, since I don't pin package versions (that is a hard work), the configuration may have been outdated. It may be a better idea to tailor one from current version.
 
 Feel free to discuss with me in Issues or E-mail, I am also active on Emacs China Forum, recently.

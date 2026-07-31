@@ -1,14 +1,14 @@
 ;;; early-init.el --- early emacs initialization -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; We should only use built-in functions here to make full use of cache.
 
 ;;; Code:
-;; firstly, set a larger gc-cons-threshold
+;; Firstly, set a larger `gc-cons-threshold' to reduce gc stalls.
 (setq gc-cons-threshold (expt 2 26)
       gc-cons-percentage 0.15)
 
-;; setup load-path filter
+;; Setup `load-path-filter-function', only available for emacs-31+
+;; We should only use built-in functions here to make full use of cache.
 (defvar my/lpf--cache-file
   (file-name-concat user-emacs-directory "load-path-filter-cache.el"))
 
@@ -78,6 +78,6 @@ If invalid, erase it from the cache.")
         path)))
 
 (setq load-path-filter-function #'my:lpf)
-(setq package-quickstart-file (concat user-emacs-directory "package-quickstart.el"))
+
 (provide 'early-init)
 ;;; early-init.el ends here
